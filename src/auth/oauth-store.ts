@@ -22,6 +22,9 @@ export interface PendingAuth {
   codeChallenge: string;
   scopes: string[];
   mcpState?: string;
+  /** Self-reported email collected on the connect page (unverified). */
+  email?: string;
+  termsAcceptedAt?: number;
 }
 
 export interface IssuedTokens {
@@ -99,7 +102,12 @@ export class OAuthStore {
         input.clientId,
         input.codeChallenge,
         input.redirectUri,
-        JSON.stringify({ scopes: input.scopes, mcpState: input.mcpState }),
+        JSON.stringify({
+          scopes: input.scopes,
+          mcpState: input.mcpState,
+          email: input.email,
+          termsAcceptedAt: input.termsAcceptedAt,
+        }),
         Date.now() + TEN_MINUTES_MS,
         Date.now(),
       );
@@ -110,7 +118,12 @@ export class OAuthStore {
     const row = this.take(state, "pending_auth");
     if (!row) return null;
     const meta = row.metadata
-      ? (JSON.parse(row.metadata) as { scopes?: string[]; mcpState?: string })
+      ? (JSON.parse(row.metadata) as {
+          scopes?: string[];
+          mcpState?: string;
+          email?: string;
+          termsAcceptedAt?: number;
+        })
       : {};
     return {
       clientId: row.client_id!,
@@ -118,6 +131,8 @@ export class OAuthStore {
       codeChallenge: row.code_challenge!,
       scopes: meta.scopes ?? [],
       mcpState: meta.mcpState,
+      email: meta.email,
+      termsAcceptedAt: meta.termsAcceptedAt,
     };
   }
 

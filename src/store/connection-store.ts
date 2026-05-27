@@ -11,6 +11,9 @@ export interface Connection {
   id: string;
   realmId: string;
   companyName: string | null;
+  /** Self-reported email captured at connect time (unverified). */
+  email: string | null;
+  termsAcceptedAt: number | null;
   accessToken: string;
   /** Epoch ms at which the access token expires. */
   accessExpiresAt: number;
@@ -23,6 +26,8 @@ export interface Connection {
 export interface NewConnection {
   realmId: string;
   companyName?: string | null;
+  email?: string | null;
+  termsAcceptedAt?: number | null;
   accessToken: string;
   accessExpiresAt: number;
   refreshToken: string;
@@ -33,6 +38,8 @@ interface ConnectionRow {
   id: string;
   realm_id: string;
   company_name: string | null;
+  email: string | null;
+  terms_accepted_at: number | null;
   access_token_enc: string;
   access_expires_at: number;
   refresh_token_enc: string;
@@ -58,14 +65,16 @@ export class ConnectionStore {
     this.db
       .prepare(
         `INSERT INTO connections
-          (id, realm_id, company_name, access_token_enc, access_expires_at,
-           refresh_token_enc, refresh_updated_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, realm_id, company_name, email, terms_accepted_at, access_token_enc,
+           access_expires_at, refresh_token_enc, refresh_updated_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         input.realmId,
         input.companyName ?? null,
+        input.email ?? null,
+        input.termsAcceptedAt ?? null,
         this.cipher.encrypt(input.accessToken),
         input.accessExpiresAt,
         this.cipher.encrypt(input.refreshToken),
@@ -126,6 +135,8 @@ export class ConnectionStore {
       id: row.id,
       realmId: row.realm_id,
       companyName: row.company_name,
+      email: row.email,
+      termsAcceptedAt: row.terms_accepted_at,
       accessToken: this.cipher.decrypt(row.access_token_enc),
       accessExpiresAt: row.access_expires_at,
       refreshToken: this.cipher.decrypt(row.refresh_token_enc),

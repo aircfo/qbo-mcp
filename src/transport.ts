@@ -86,6 +86,16 @@ export const handleMcpPost: RequestHandler = async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   const existing = sessionId ? sessions.get(sessionId) : undefined;
   if (existing) {
+    // Defense-in-depth for a multi-tenant server: a session must be driven by
+    // the same connection that created it. Session ids are unguessable, but we
+    // never want a token for connection B to operate connection A's session.
+    if (existing.connectionId !== connectionId) {
+      res
+        .status(403)
+        .json({ error: "session does not belong to this connection" });
+      log.warn({ connectionId, sessionId }, "session_connection_mismatch");
+      return;
+    }
     existing.lastActive = Date.now();
     await existing.transport.handleRequest(req, res, req.body);
     return;
@@ -136,6 +146,12 @@ async function withSession(
   const session = sessionId ? sessions.get(sessionId) : undefined;
   if (!sessionId || !session) {
     res.status(400).json({ error: "invalid or missing session id" });
+    return;
+  }
+  if (session.connectionId !== connectionIdFrom(req)) {
+    res
+      .status(403)
+      .json({ error: "session does not belong to this connection" });
     return;
   }
   session.lastActive = Date.now();

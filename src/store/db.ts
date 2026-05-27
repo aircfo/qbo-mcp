@@ -26,6 +26,8 @@ export function openDatabase(path: string): Database.Database {
       id                 TEXT PRIMARY KEY,
       realm_id           TEXT NOT NULL,
       company_name       TEXT,
+      email              TEXT,
+      terms_accepted_at  INTEGER,
       access_token_enc   TEXT NOT NULL,
       access_expires_at  INTEGER NOT NULL,
       refresh_token_enc  TEXT NOT NULL,
@@ -61,5 +63,24 @@ export function openDatabase(path: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_oauth_tokens_kind ON oauth_tokens (kind);
   `);
 
+  // Migrations for databases created before a column existed (CREATE TABLE IF
+  // NOT EXISTS won't add columns to an existing table). Safe + idempotent.
+  ensureColumn(db, "connections", "email", "TEXT");
+  ensureColumn(db, "connections", "terms_accepted_at", "INTEGER");
+
   return db;
+}
+
+function ensureColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }

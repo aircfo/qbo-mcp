@@ -14,23 +14,21 @@ import type {
   OAuthTokenRevocationRequest,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { IntuitOAuth } from "../qbo/intuit-oauth.js";
 import type { OAuthStore } from "./oauth-store.js";
+import { renderConnectPage } from "./connect-page.js";
 
 const SCOPE = "com.intuit.quickbooks.accounting";
 
 /**
  * Bridges the MCP OAuth surface (Claude ↔ this server) to Intuit's OAuth
- * (this server ↔ QuickBooks). The `authorize` step redirects the user to
- * Intuit's consent screen; the Intuit callback (see auth/intuit-callback.ts)
- * creates the connection and issues our own authorization code. The remaining
- * methods are the standard code/refresh/verify lifecycle, backed by OAuthStore.
+ * (this server ↔ QuickBooks). The `authorize` step renders the connect page
+ * (which collects an email, then forwards to Intuit via /connect/start); the
+ * Intuit callback (see auth/intuit-callback.ts) creates the connection and
+ * issues our own authorization code. The remaining methods are the standard
+ * code/refresh/verify lifecycle, backed by OAuthStore.
  */
 export class QboOAuthProvider implements OAuthServerProvider {
-  constructor(
-    private readonly store: OAuthStore,
-    private readonly intuit: IntuitOAuth,
-  ) {}
+  constructor(private readonly store: OAuthStore) {}
 
   get clientsStore(): OAuthRegisteredClientsStore {
     return this.store.clientsStore;
@@ -41,14 +39,16 @@ export class QboOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response,
   ): Promise<void> {
-    const state = this.store.createPendingAuth({
-      clientId: client.client_id,
-      redirectUri: params.redirectUri,
-      codeChallenge: params.codeChallenge,
-      scopes: params.scopes ?? [],
-      mcpState: params.state,
-    });
-    res.redirect(this.intuit.authorizeUri(state));
+    // The SDK has already validated client + redirect_uri + PKCE here, so we
+    // render the email-collection page; /connect/start re-validates on submit.
+    res.type("html").send(
+      renderConnectPage({
+        clientId: client.client_id,
+        redirectUri: params.redirectUri,
+        codeChallenge: params.codeChallenge,
+        mcpState: params.state,
+      }),
+    );
   }
 
   async challengeForAuthorizationCode(

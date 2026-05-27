@@ -3,6 +3,7 @@ import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { env } from "./config/env.js";
 import { oauthProvider } from "./deps.js";
+import { connectStartHandler } from "./auth/connect-start.js";
 import { intuitCallbackHandler } from "./auth/intuit-callback.js";
 import { log } from "./log.js";
 import {
@@ -49,6 +50,14 @@ app.options("/mcp", (_req, res) => res.sendStatus(204));
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
+
+// Connect-page form submit (collects email, then forwards to Intuit). Needs
+// urlencoded body parsing for the HTML form post.
+app.post(
+  "/connect/start",
+  express.urlencoded({ extended: false }),
+  connectStartHandler,
+);
 
 // Where Intuit redirects after the user grants consent. Not part of the MCP
 // OAuth surface — it's our upstream callback that creates the connection.
