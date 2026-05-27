@@ -6,6 +6,7 @@ import { oauthProvider } from "./deps.js";
 import { connectStartHandler } from "./auth/connect-start.js";
 import { intuitCallbackHandler } from "./auth/intuit-callback.js";
 import { log } from "./log.js";
+import { RateLimiter } from "./rate-limit.js";
 import {
   handleMcpDelete,
   handleMcpGet,
@@ -32,7 +33,26 @@ const app = express();
 
 // Behind Railway's proxy: trust one hop so req.ip / protocol reflect the client.
 app.set("trust proxy", 1);
-app.use(express.json());
+
+// Per-IP backstop against abuse of the public, unauthenticated surface (the
+// per-connection limit in transport.ts is the finer control for tool calls).
+// Generous, since teammates may share an office IP; this is a DoS guard, not
+// fine-grained throttling. /health is exempt for Railway's probe.
+const ipLimiter = new RateLimiter(600, 60_000);
+setInterval(() => ipLimiter.sweep(), 5 * 60_000).unref();
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  const { allowed, retryAfterMs } = ipLimiter.check(req.ip ?? "unknown");
+  if (!allowed) {
+    res.setHeader("Retry-After", Math.ceil(retryAfterMs / 1000).toString());
+    res.status(429).json({ error: "rate_limited" });
+    return;
+  }
+  next();
+});
+
+// Cap request bodies so a malicious client can't OOM us with a huge payload.
+app.use(express.json({ limit: "256kb" }));
 
 // CORS for browser-based MCP clients. Inlined to avoid a dependency.
 app.use((_req, res, next) => {
@@ -55,7 +75,7 @@ app.get("/health", (_req, res) => {
 // urlencoded body parsing for the HTML form post.
 app.post(
   "/connect/start",
-  express.urlencoded({ extended: false }),
+  express.urlencoded({ extended: false, limit: "16kb" }),
   connectStartHandler,
 );
 
@@ -81,14 +101,31 @@ app.post("/mcp", requireAuth, handleMcpPost);
 app.get("/mcp", requireAuth, handleMcpGet);
 app.delete("/mcp", requireAuth, handleMcpDelete);
 
-// Final error handler: a thrown/rejected handler returns a clean 500 and a log
-// line instead of hanging the request or bubbling into the process.
+// Final error handler. Preserves a client-error status the middleware set
+// (e.g. body-parser's 413 for an oversized payload); otherwise 500. Either way
+// it returns a clean JSON body and a log line instead of hanging the request.
+function statusOf(err: unknown): number {
+  if (err && typeof err === "object") {
+    const e = err as { status?: unknown; statusCode?: unknown };
+    if (typeof e.status === "number") return e.status;
+    if (typeof e.statusCode === "number") return e.statusCode;
+  }
+  return 500;
+}
 const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
-  log.error(
-    { path: req.path, err: err instanceof Error ? err.stack : String(err) },
-    "request_error",
-  );
-  if (!res.headersSent) res.status(500).json({ error: "internal_error" });
+  const status = statusOf(err);
+  const fields = {
+    path: req.path,
+    status,
+    err: err instanceof Error ? err.stack : String(err),
+  };
+  if (status >= 500) log.error(fields, "request_error");
+  else log.warn(fields, "request_rejected");
+  if (!res.headersSent) {
+    res
+      .status(status)
+      .json({ error: status >= 500 ? "internal_error" : "request_rejected" });
+  }
 };
 app.use(errorHandler);
 

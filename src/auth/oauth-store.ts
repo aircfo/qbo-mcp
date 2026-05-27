@@ -251,6 +251,15 @@ export class OAuthStore {
       .run(Date.now(), hash(token));
   }
 
+  /** Revoke every live downstream token for a connection (used on disconnect). */
+  revokeConnectionTokens(connectionId: string): void {
+    this.db
+      .prepare(
+        "UPDATE oauth_tokens SET revoked_at = ? WHERE connection_id = ? AND revoked_at IS NULL",
+      )
+      .run(Date.now(), connectionId);
+  }
+
   // --- internals ---
 
   /** Read a live (unexpired, unrevoked) row without consuming it. */

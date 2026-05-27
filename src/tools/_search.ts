@@ -95,6 +95,25 @@ export function extractList(res: unknown, entityKey: string): unknown[] {
   return Array.isArray(list) ? list : [];
 }
 
+/**
+ * Validate that every filter/sort field is on the entity's allowlist. Returns
+ * an error message (listing the allowed fields) or null when all fields pass.
+ * Keeps user-supplied field names out of the QBO query unless we expect them.
+ */
+export function validateFields(
+  args: SearchArgs,
+  allowed: readonly string[],
+): string | null {
+  const allowedSet = new Set(allowed);
+  const used = [
+    ...(args.filters ?? []).map((f) => f.field),
+    ...(args.sort_by ? [args.sort_by] : []),
+  ];
+  const bad = used.filter((field) => !allowedSet.has(field));
+  if (bad.length === 0) return null;
+  return `Unsupported field(s): ${bad.join(", ")}. Allowed fields: ${allowed.join(", ")}.`;
+}
+
 /** Drop the always-present envelope noise QBO stamps on every entity. */
 export function slimEntity<T>(entity: T): T {
   if (!entity || typeof entity !== "object") return entity;

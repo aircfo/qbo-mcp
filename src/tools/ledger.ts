@@ -1,12 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type QuickBooks from "node-quickbooks";
-import { promisify } from "./_format.js";
+import { promisify, toolError } from "./_format.js";
 import {
   buildCriteria,
   extractList,
   searchInput,
   slimEntity,
+  validateFields,
   type SearchArgs,
 } from "./_search.js";
 import { runQbo } from "./_shared.js";
@@ -20,6 +21,8 @@ interface EntitySpec {
   getName: string;
   /** The key under `QueryResponse` that holds the rows, e.g. "Invoice". */
   queryKey: string;
+  /** Allowlist of fields a caller may filter/sort on. */
+  filterFields: readonly string[];
   finder: (qb: QuickBooks, criteria: object, cb: QboCb) => void;
   getter: (qb: QuickBooks, id: string, cb: QboCb) => void;
   searchDescription: string;
@@ -34,14 +37,17 @@ function registerEntity(
   server.registerTool(
     spec.searchName,
     { description: spec.searchDescription, inputSchema: searchInput },
-    async (args: SearchArgs) =>
-      runQbo(connectionId, async (qb) => {
+    async (args: SearchArgs) => {
+      const fieldError = validateFields(args, spec.filterFields);
+      if (fieldError) return toolError(fieldError);
+      return runQbo(connectionId, async (qb) => {
         const res = await promisify((cb) =>
           spec.finder(qb, buildCriteria(args), cb),
         );
         const results = extractList(res, spec.queryKey).map(slimEntity);
         return { count: results.length, results };
-      }),
+      });
+    },
   );
 
   server.registerTool(
@@ -62,6 +68,15 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_accounts",
     getName: "get_account",
     queryKey: "Account",
+    filterFields: [
+      "Id",
+      "Name",
+      "AccountType",
+      "AccountSubType",
+      "Classification",
+      "Active",
+      "CurrentBalance",
+    ],
     finder: (qb, c, cb) => qb.findAccounts(c, cb),
     getter: (qb, id, cb) => qb.getAccount(id, cb),
     searchDescription:
@@ -73,6 +88,7 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_journal_entries",
     getName: "get_journal_entry",
     queryKey: "JournalEntry",
+    filterFields: ["Id", "TxnDate", "DocNumber", "Adjust", "PrivateNote"],
     finder: (qb, c, cb) => qb.findJournalEntries(c, cb),
     getter: (qb, id, cb) => qb.getJournalEntry(id, cb),
     searchDescription:
@@ -83,6 +99,15 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_invoices",
     getName: "get_invoice",
     queryKey: "Invoice",
+    filterFields: [
+      "Id",
+      "DocNumber",
+      "TxnDate",
+      "DueDate",
+      "CustomerRef",
+      "Balance",
+      "TotalAmt",
+    ],
     finder: (qb, c, cb) => qb.findInvoices(c, cb),
     getter: (qb, id, cb) => qb.getInvoice(id, cb),
     searchDescription:
@@ -93,6 +118,15 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_bills",
     getName: "get_bill",
     queryKey: "Bill",
+    filterFields: [
+      "Id",
+      "TxnDate",
+      "DueDate",
+      "DocNumber",
+      "VendorRef",
+      "Balance",
+      "TotalAmt",
+    ],
     finder: (qb, c, cb) => qb.findBills(c, cb),
     getter: (qb, id, cb) => qb.getBill(id, cb),
     searchDescription:
@@ -104,6 +138,7 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_vendors",
     getName: "get_vendor",
     queryKey: "Vendor",
+    filterFields: ["Id", "DisplayName", "CompanyName", "Active", "Balance"],
     finder: (qb, c, cb) => qb.findVendors(c, cb),
     getter: (qb, id, cb) => qb.getVendor(id, cb),
     searchDescription:
@@ -114,6 +149,7 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_customers",
     getName: "get_customer",
     queryKey: "Customer",
+    filterFields: ["Id", "DisplayName", "CompanyName", "Active", "Balance"],
     finder: (qb, c, cb) => qb.findCustomers(c, cb),
     getter: (qb, id, cb) => qb.getCustomer(id, cb),
     searchDescription:
@@ -124,6 +160,7 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_items",
     getName: "get_item",
     queryKey: "Item",
+    filterFields: ["Id", "Name", "Type", "Active", "UnitPrice"],
     finder: (qb, c, cb) => qb.findItems(c, cb),
     getter: (qb, id, cb) => qb.getItem(id, cb),
     searchDescription:
@@ -134,6 +171,7 @@ const ENTITIES: EntitySpec[] = [
     searchName: "search_payments",
     getName: "get_payment",
     queryKey: "Payment",
+    filterFields: ["Id", "TxnDate", "CustomerRef", "TotalAmt"],
     finder: (qb, c, cb) => qb.findPayments(c, cb),
     getter: (qb, id, cb) => qb.getPayment(id, cb),
     searchDescription:

@@ -53,4 +53,9 @@ export class IntuitOAuth {
       accessExpiresAt: Date.now() + (token.expires_in ?? 3600) * 1000,
     };
   }
+
+  /** Revoke a token with Intuit so it can't be reused after disconnect. */
+  async revoke(token: string): Promise<void> {
+    await this.oauth.revoke({ token });
+  }
 }

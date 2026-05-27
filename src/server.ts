@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerCompanyTools } from "./tools/company.js";
+import { registerConnectionTools } from "./tools/connection.js";
 import { registerLedgerTools } from "./tools/ledger.js";
 import { registerReportTools } from "./tools/reports.js";
 
@@ -16,5 +17,6 @@ export function createMcpServer(connectionId: string): McpServer {
   registerCompanyTools(server, connectionId);
   registerReportTools(server, connectionId);
   registerLedgerTools(server, connectionId);
+  registerConnectionTools(server, connectionId);
   return server;
 }
