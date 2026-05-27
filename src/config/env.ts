@@ -42,6 +42,11 @@ const envSchema = z.object({
   INTUIT_CLIENT_SECRET: z.string().min(1),
   INTUIT_REDIRECT_URI: z.string().url(),
   INTUIT_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+
+  // Optional links surfaced on the connect page. When set, the acknowledgment
+  // references them; when unset, the page shows a generic data-access notice.
+  TERMS_URL: z.string().url().optional(),
+  PRIVACY_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

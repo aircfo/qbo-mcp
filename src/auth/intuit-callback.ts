@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 import { env } from "../config/env.js";
 import { connectionStore, intuitOAuth, oauthStore } from "../deps.js";
+import { log } from "../log.js";
 
 function errorPage(message: string): string {
   return `<!doctype html><html><body style="font-family:system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#fff0f0">
@@ -54,10 +55,16 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
 
     const connectionId = connectionStore.create({
       realmId: tokens.realmId,
+      email: pending.email ?? null,
+      termsAcceptedAt: pending.termsAcceptedAt ?? null,
       accessToken: tokens.accessToken,
       accessExpiresAt: tokens.accessExpiresAt,
       refreshToken: tokens.refreshToken,
     });
+    log.info(
+      { connectionId, realmId: tokens.realmId, email: pending.email },
+      "connection_created",
+    );
 
     const authCode = oauthStore.issueAuthCode({
       clientId: pending.clientId,
