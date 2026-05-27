@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+
+# SQLite database lives on a Railway volume in prod and is generated locally in
+# dev — never commit it (it holds encrypted user tokens) or its WAL sidecars.
+data/
+*.db
+*.db-shm
+*.db-wal
