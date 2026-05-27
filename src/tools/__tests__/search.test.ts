@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildCriteria, extractList, slimEntity } from "../_search.js";
+import {
+  buildCriteria,
+  extractList,
+  slimEntity,
+  validateFields,
+} from "../_search.js";
 
 describe("buildCriteria", () => {
   it("returns an empty object when there are no args (fetch all)", () => {
@@ -66,5 +71,38 @@ describe("slimEntity", () => {
 
   it("passes through non-objects unchanged", () => {
     expect(slimEntity(null)).toBeNull();
+  });
+});
+
+describe("validateFields", () => {
+  const allowed = ["Id", "TxnDate", "TotalAmt"] as const;
+
+  it("returns null when all filter/sort fields are allowed", () => {
+    expect(
+      validateFields(
+        {
+          filters: [{ field: "TxnDate", value: "2026-01-01" }],
+          sort_by: "TotalAmt",
+        },
+        allowed,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when there are no fields at all", () => {
+    expect(validateFields({}, allowed)).toBeNull();
+  });
+
+  it("flags a disallowed filter field and lists the allowed ones", () => {
+    const msg = validateFields(
+      { filters: [{ field: "DROP TABLE", value: 1 }] },
+      allowed,
+    );
+    expect(msg).toContain("DROP TABLE");
+    expect(msg).toContain("Id, TxnDate, TotalAmt");
+  });
+
+  it("flags a disallowed sort field", () => {
+    expect(validateFields({ sort_by: "Secret" }, allowed)).toContain("Secret");
   });
 });
