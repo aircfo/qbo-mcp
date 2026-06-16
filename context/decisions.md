@@ -29,10 +29,39 @@ Intuit tokens are replayed upstream on every call, so they must be reversible �
 hashing (the pattern used for downstream-only compare-tokens) won't work here.
 GCM also gives tamper detection.
 
-## 2026-05-26 — Downstream auth: stateless access JWT + durable connection
+## 2026-05-26 — Downstream auth: opaque DB-backed tokens + durable connection
 
-**Decision:** the MCP access token is a stateless signed JWT carrying a
-`connectionId`; the durable Intuit tokens are looked up from SQLite per request.
-This keeps Intuit tokens out of the client's stored bearer and means a server
-restart never forces re-consent (the signed JWT still verifies; the connection
-row still exists).
+**Decision:** the MCP access/refresh tokens are opaque random strings, stored
+only as SHA-256 hashes in `oauth_tokens` and verified by hash lookup per request;
+each carries a `connectionId` used to load the durable (encrypted) Intuit tokens
+from the `connections` table. Rejected stateless JWTs: opaque tokens are
+revocable — `disconnect_quickbooks` revokes every downstream token for a
+connection — which a stateless JWT can't do without a separate blocklist. This
+keeps Intuit tokens out of the client's stored bearer, and a server restart
+never forces re-consent (the token hashes and the connection row both persist).
+
+## 2026-06-16 — Report tools return flattened rows by default (compact)
+
+A vendor-spend query ("top 25 vendors by spend, by month") forced multiple raw
+`get_general_ledger` pulls of ~300 KB–1 MB each — every call exceeded the client
+token limit and spilled to disk. ~70%+ of those tokens were report scaffolding
+(`MetaData`, `ColData` wrappers, running balances, section summaries) and accounts
+the question never needed.
+
+**Decision:** add `flattenReport`/`shapeReport` (pure, in `_format.ts`) and route
+every report tool through it. Reports now default to `format: "compact"` —
+`{ columns, rows }` keyed by column title, with the section/account header carried
+onto each row as `group`. `format: "raw"` still returns the full QBO envelope for
+callers that need it. This is a **behavior change** for existing consumers parsing
+raw JSON; raw is one param away. Detail reports also take `max_rows` (default
+5000) and return a truncation envelope rather than relying on the client to spill.
+
+The highest-leverage fix was structural, not just shaping: `get_expenses_by_vendor`
+(QBO `VendorExpenses`) answers the original query in one call. `summarize_column_by`
+is reliable on summary reports like VendorExpenses but is reportedly flaky on the
+GeneralLedger detail report, so vendor-by-month belongs on the summary tool.
+
+**Unverified (needs live sandbox):** the GeneralLedger `account_type` filter param
+name and whether `summarize_column_by` splits GL columns. `node-quickbooks`
+forwards any key verbatim as a query param, so a wrong name silently no-ops rather
+than erroring — these must be confirmed against a live connection.

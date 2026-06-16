@@ -28,15 +28,19 @@ Built because the official options don't fit a finance team's needs:
 
 ```
 MCP client (Claude)
-  └─ HTTP /mcp  (Streamable HTTP, Bearer access-token JWT carrying connectionId)
+  └─ HTTP /mcp  (Streamable HTTP; Bearer access token → connectionId, resolved server-side)
        └─ per-request QBO client, built from the user's stored + refreshed tokens
             └─ QuickBooks Online API
 ```
 
-Persistent state is one encrypted SQLite table: `connections` (one row per
-connected QuickBooks company — `realmId` + encrypted access/refresh tokens).
-Downstream MCP access tokens are stateless signed JWTs; only what must survive a
-restart is stored.
+Durable state is a single SQLite database with three tables: `connections` (one
+row per connected QuickBooks company — `realmId` + the Intuit access/refresh
+tokens, **encrypted** at rest), `oauth_clients` (dynamically-registered MCP
+clients), and `oauth_tokens` (the downstream Claude ↔ server OAuth artifacts).
+Downstream MCP access/refresh tokens are opaque random strings, stored only as
+SHA-256 hashes and verified by hash lookup per request — so they stay revocable
+(used on disconnect) and survive a restart without ever forcing Intuit
+re-consent.
 
 ### Why SQLite on a volume (not Postgres/Supabase)
 
@@ -60,17 +64,28 @@ a volume attaches to one instance, so this assumes a single running instance
 - [x] Batch B — ledger read/search: accounts, journal entries, invoices, bills, vendors, customers, items, payments
 - [ ] (deferred) Writes — out of scope for read-only v1
 
-## Tools (v1, read-only) — 24 total
+## Tools (v1) — 30 total
+
+All data tools are read-only; the only state-changing tool is `disconnect_quickbooks`.
 
 **Company:** `get_company_info`
 
-**Reports:** `get_profit_and_loss`, `get_balance_sheet`, `get_cash_flow`,
-`get_trial_balance`, `get_general_ledger`, `get_aged_receivables`, `get_aged_payables`
+**Reports:** `get_profit_and_loss`, `get_profit_and_loss_detail`,
+`get_balance_sheet`, `get_cash_flow`, `get_trial_balance`, `get_general_ledger`,
+`get_expenses_by_vendor`, `get_vendor_balance`, `get_vendor_balance_detail`,
+`get_transactions_by_vendor`, `get_aged_receivables`, `get_aged_payables`.
+Report tools return flattened rows by default (`format: "compact"`) to stay
+token-cheap; pass `format: "raw"` for the full QBO JSON. Detail reports accept
+`max_rows` (default 5000). For ranking vendors by spend, `get_expenses_by_vendor`
+answers it in one call — prefer it over the general ledger.
 
 **Ledger read/search** (a `search_*` + `get_*` pair each): accounts, journal
 entries, invoices, bills, vendors, customers, items, payments — e.g.
 `search_invoices` / `get_invoice`. `search_*` tools take typed `filters`
 (field/operator/value), `limit`, `offset`, and sort; `get_*` take an `id`.
+
+**Connection:** `disconnect_quickbooks` — revokes the connection with Intuit,
+deletes the stored tokens, and ends access (re-authorize to reconnect).
 
 ## Environment
 

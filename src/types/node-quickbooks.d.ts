@@ -26,6 +26,11 @@ declare module "node-quickbooks" {
     reportGeneralLedgerDetail(options: object, callback: QboCallback): void;
     reportAgedReceivables(options: object, callback: QboCallback): void;
     reportAgedPayables(options: object, callback: QboCallback): void;
+    reportProfitAndLossDetail(options: object, callback: QboCallback): void;
+    reportVendorExpenses(options: object, callback: QboCallback): void;
+    reportVendorBalance(options: object, callback: QboCallback): void;
+    reportVendorBalanceDetail(options: object, callback: QboCallback): void;
+    reportTransactionListByVendor(options: object, callback: QboCallback): void;
 
     // Ledger read/search (Batch B). find* take a criteria object/array and
     // return { QueryResponse: { <Entity>: [...] } }; get* take an id.
