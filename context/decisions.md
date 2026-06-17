@@ -95,3 +95,27 @@ Honest framing carried into the tool descriptions: flattening alone can't make a
 full unfiltered month of GL inline-able — the real levers are the `columns`
 projection, the account/vendor/`account_type` filters, and `max_rows`; vendor
 spend should use `get_expenses_by_vendor` (a summary report, returns inline).
+
+## 2026-06-16 — Sandbox-verified the GL params; dropped `summarize_column_by` from detail reports
+
+Live testing against a real company resolved the two items flagged "unverified":
+
+- **`account_type` works.** GL with `account_type=Expense` returns only expense
+  accounts — balance-sheet, income, and COGS accounts are excluded (282 KB → 61 KB
+  for one month). The param name is correct; no change needed.
+- **`summarize_column_by` is a silent no-op on detail reports.** QBO's
+  GeneralLedger report ignores it — you get one combined column, never per-month
+  columns. It's reliable only on *summary* reports (verified on ProfitAndLoss and
+  VendorExpenses).
+
+**Decision:** remove `summarize_column_by` from `get_general_ledger` and
+`get_profit_and_loss_detail` (same detail-report class). A param that silently
+does nothing is worse than no param — a caller would believe they got a monthly
+breakout. For a monthly trend, use `get_profit_and_loss` / `get_expenses_by_vendor`
+(summary reports, where the split works) or derive the month from each GL row's
+`Date`. `summarize_column_by` stays on the summary reports (P&L, balance sheet,
+cash flow, expenses by vendor) where QBO honors it.
+
+Also confirmed end to end: the lossless `{ columns, rows, totals }` fix reconciles
+exactly (Mar/Apr/May COGS+Expenses match to the dollar; the ~$40k/month of
+parent-posted money is recovered via `totals`).

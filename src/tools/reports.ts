@@ -115,11 +115,10 @@ export function registerReportTools(
     "get_profit_and_loss_detail",
     {
       description:
-        "Profit & Loss Detail: every transaction line behind each P&L account, not just the totals. Use when you need the postings that make up income or an expense line. Optionally filter by customer/vendor and split into columns by period.",
+        "Profit & Loss Detail: every transaction line behind each P&L account, not just the totals. Use when you need the postings that make up income or an expense line. Optionally filter by customer/vendor. For a monthly trend use get_profit_and_loss (a summary report); QBO does not split detail reports into period columns.",
       inputSchema: {
         ...dateRange,
         accounting_method: accountingMethod,
-        summarize_column_by: summarizeBy,
         customer: z
           .string()
           .optional()
@@ -193,11 +192,11 @@ export function registerReportTools(
     {
       description:
         "General Ledger detail: every transaction line posted to each account in the period. The drill-down behind the trial balance and financial statements. " +
-        "A full unfiltered month is large and may exceed the inline limit — narrow it with a tight date range, an account_type/account/vendor/customer filter, or a columns projection (e.g. columns='tx_date,vend_name,account_name,subt_nat_amount'). For ranking vendors by spend, use get_expenses_by_vendor instead (it returns inline).",
+        "A full unfiltered month is large and may exceed the inline limit — narrow it with a tight date range, an account_type/account/vendor/customer filter, or a columns projection (e.g. columns='tx_date,vend_name,account_name,subt_nat_amount'). For ranking vendors by spend, use get_expenses_by_vendor instead (it returns inline). " +
+        "The GL returns one period column — for a monthly trend use get_profit_and_loss or get_expenses_by_vendor, or derive the month from each row's Date.",
       inputSchema: {
         ...dateRange,
         accounting_method: accountingMethod,
-        summarize_column_by: summarizeBy,
         account: z
           .string()
           .optional()
