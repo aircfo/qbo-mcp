@@ -77,7 +77,11 @@ const glReport = {
   },
 };
 
-// A Profit & Loss-shaped report: nested sections, a blank-titled label column.
+// A Profit & Loss-shaped report: nested sections, a blank-titled label column,
+// and the parent-with-direct-posting case that exposed the fidelity bug — the
+// $40,160 booked directly to "63000 Practice Development" exists ONLY in that
+// section's Summary (45,160 total vs the single 5,000 child leaf), never as a
+// leaf row. "Net Income" is a QBO-tagged computed line (group attribute).
 const plReport = {
   Header: { ReportName: "ProfitAndLoss" },
   Columns: { Column: [{ ColTitle: "" }, { ColTitle: "Total" }] },
@@ -99,20 +103,32 @@ const plReport = {
         type: "Section",
       },
       {
-        Header: { ColData: [{ value: "Expenses" }, { value: "" }] },
+        Header: {
+          ColData: [{ value: "63000 Practice Development" }, { value: "" }],
+        },
         Rows: {
           Row: [
             {
               type: "Data",
-              ColData: [{ value: "Rent", id: "2" }, { value: "3000.00" }],
-            },
-            {
-              type: "Data",
-              ColData: [{ value: "Payroll", id: "3" }, { value: "5000.00" }],
+              ColData: [
+                { value: "63100 Conferences", id: "3" },
+                { value: "5000.00" },
+              ],
             },
           ],
         },
+        Summary: {
+          ColData: [
+            { value: "Total 63000 Practice Development" },
+            { value: "45160.00" },
+          ],
+        },
         type: "Section",
+      },
+      {
+        type: "Data",
+        group: "NetIncome",
+        ColData: [{ value: "Net Income" }, { value: "-35160.00" }],
       },
     ],
   },
@@ -162,14 +178,14 @@ describe("promisify", () => {
 });
 
 describe("flattenReport", () => {
-  it("emits one row per leaf ColData and no section/summary rows", () => {
+  it("emits one leaf-data row per transaction, with no summaries in rows", () => {
     // 2 leaves under Checking + 1 under Office Expense = 3.
     expect(flattenReport(glReport).rows).toHaveLength(3);
-    // P&L: Sales + Rent + Payroll = 3 leaves across two sections.
-    expect(flattenReport(plReport).rows).toHaveLength(3);
+    // P&L leaves: Sales + 63100 Conferences = 2 (Net Income is a total).
+    expect(flattenReport(plReport).rows).toHaveLength(2);
   });
 
-  it("keys each row by column title and carries the section header as group", () => {
+  it("returns array rows aligned to a single columns header", () => {
     const { columns, rows } = flattenReport(glReport);
     expect(columns).toEqual([
       "group",
@@ -179,34 +195,57 @@ describe("flattenReport", () => {
       "Amount",
       "Balance",
     ]);
-    expect(rows[0]).toEqual({
-      group: "Checking",
-      Date: "2026-03-02",
-      "Transaction Type": "Bill Payment",
-      Name: "Eight Point Compass",
-      Amount: "-2000.00",
-      Balance: "8000.00",
-    });
-    // The last leaf belongs to a different account section.
-    expect(rows[2].group).toBe("Office Expense");
+    expect(rows[0]).toEqual([
+      "Checking",
+      "2026-03-02",
+      "Bill Payment",
+      "Eight Point Compass",
+      "-2000.00",
+      "8000.00",
+    ]);
+    // Every row carries its account section as the leading "group" element.
+    expect(rows.map((row) => row[0])).toEqual([
+      "Checking",
+      "Checking",
+      "Office Expense",
+    ]);
   });
 
   it("carries the nearest section header onto nested leaves", () => {
-    const groups = flattenReport(plReport).rows.map((r) => r.group);
-    expect(groups).toEqual(["Income", "Expenses", "Expenses"]);
+    const groups = flattenReport(plReport).rows.map((row) => row[0]);
+    expect(groups).toEqual(["Income", "63000 Practice Development"]);
   });
 
   it("falls back to a stable key for blank-titled columns", () => {
-    // P&L's first (label) column has no ColTitle, so it becomes col0.
-    expect(flattenReport(plReport).rows[0]).toEqual({
-      group: "Income",
-      col0: "Sales",
-      Total: "10000.00",
-    });
+    const flat = flattenReport(plReport);
+    expect(flat.columns).toEqual(["group", "col0", "Total"]);
+    expect(flat.rows[0]).toEqual(["Income", "Sales", "10000.00"]);
   });
 
-  it("drops MetaData/ColType/id scaffolding from every row", () => {
-    const serialized = JSON.stringify(flattenReport(glReport).rows);
+  it("preserves subtotals in totals, including parent-direct postings", () => {
+    const { totals } = flattenReport(plReport);
+    // The $40,160 booked directly to the parent survives only via this
+    // subtotal (45,160 total vs the 5,000 child leaf). Dropping it was the bug.
+    expect(totals).toContainEqual([
+      "63000 Practice Development",
+      "Total 63000 Practice Development",
+      "45160.00",
+    ]);
+    // QBO-tagged computed lines land in totals, not rows.
+    expect(totals).toContainEqual(["NetIncome", "Net Income", "-35160.00"]);
+  });
+
+  it("keeps section subtotals out of the summable rows array", () => {
+    const { rows, totals } = flattenReport(glReport);
+    expect(rows.flat()).not.toContain("Total for Checking");
+    expect(totals.map((total) => total[1])).toEqual([
+      "Total for Checking",
+      "Total for Office Expense",
+    ]);
+  });
+
+  it("drops MetaData/ColType/id scaffolding from the output", () => {
+    const serialized = JSON.stringify(flattenReport(glReport));
     expect(serialized).not.toContain("MetaData");
     expect(serialized).not.toContain("ColType");
     expect(serialized).not.toContain("ColData");
@@ -219,8 +258,9 @@ describe("flattenReport", () => {
   });
 
   it("returns an empty result for missing or malformed input", () => {
-    expect(flattenReport(undefined)).toEqual({ columns: ["group"], rows: [] });
-    expect(flattenReport({})).toEqual({ columns: ["group"], rows: [] });
+    const empty = { columns: ["group"], rows: [], totals: [] };
+    expect(flattenReport(undefined)).toEqual(empty);
+    expect(flattenReport({})).toEqual(empty);
   });
 });
 
@@ -230,18 +270,19 @@ describe("shapeReport", () => {
   });
 
   it("flattens by default", () => {
-    const shaped = shapeReport(glReport);
-    expect(shaped).toEqual(flattenReport(glReport));
+    expect(shapeReport(glReport)).toEqual(flattenReport(glReport));
   });
 
-  it("truncates with an envelope when rows exceed maxRows", () => {
+  it("caps rows but keeps totals when rows exceed maxRows", () => {
     const shaped = shapeReport(glReport, { maxRows: 2 }) as {
       rows: unknown[];
+      totals: unknown[];
       truncated: boolean;
       returned: number;
       hint: string;
     };
     expect(shaped.rows).toHaveLength(2);
+    expect(shaped.totals).toHaveLength(2);
     expect(shaped.truncated).toBe(true);
     expect(shaped.returned).toBe(2);
     expect(shaped.hint).toContain("get_expenses_by_vendor");
