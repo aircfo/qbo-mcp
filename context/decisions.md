@@ -65,3 +65,33 @@ GeneralLedger detail report, so vendor-by-month belongs on the summary tool.
 name and whether `summarize_column_by` splits GL columns. `node-quickbooks`
 forwards any key verbatim as a query param, so a wrong name silently no-ops rather
 than erroring — these must be confirmed against a live connection.
+
+## 2026-06-16 — Compact format made lossless + array-encoded (post-test fix)
+
+Live testing caught two problems with the first compact implementation:
+
+1. **It dropped money.** Reconciling a compact P&L came up ~9% / ~$40k/month short.
+   The first flatten kept only leaf rows and discarded every section `Summary`.
+   But an amount booked *directly* to a parent account (e.g. $40,160 to "63000
+   Practice Development") exists ONLY in that parent's subtotal — there is no leaf
+   row for it — so dropping summaries lost it. (Summary reports only; the GL is
+   unaffected, since every posting there is its own transaction line.)
+2. **It wasn't actually token-cheap for detail reports.** A compact GL was only
+   ~13% smaller than raw, because every row repeated the full column-title keys
+   and a detail report is mostly data, not scaffolding. The "70%+ scaffolding"
+   win holds for summary reports, not the GL.
+
+**Decision:** `flattenReport`/`shapeReport` now return
+`{ columns, rows, totals }`:
+
+- `rows` and `totals` are **arrays aligned to a single `columns` header** (no
+  per-row key repetition) — ~40% smaller rows.
+- `totals` holds section subtotals and QBO-tagged computed lines (Gross Profit,
+  Net Income), so nothing monetary is dropped. `rows` (leaf data) stays safe to
+  sum; `totals` carries the authoritative figures, including parent-direct
+  amounts. The truncation envelope caps `rows` but always keeps `totals`.
+
+Honest framing carried into the tool descriptions: flattening alone can't make a
+full unfiltered month of GL inline-able — the real levers are the `columns`
+projection, the account/vendor/`account_type` filters, and `max_rows`; vendor
+spend should use `get_expenses_by_vendor` (a summary report, returns inline).

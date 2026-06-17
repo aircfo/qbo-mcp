@@ -193,7 +193,7 @@ export function registerReportTools(
     {
       description:
         "General Ledger detail: every transaction line posted to each account in the period. The drill-down behind the trial balance and financial statements. " +
-        "Filter by account/vendor/customer/account_type and use columns to return only the fields you need. For ranking vendors by spend, prefer get_expenses_by_vendor.",
+        "A full unfiltered month is large and may exceed the inline limit — narrow it with a tight date range, an account_type/account/vendor/customer filter, or a columns projection (e.g. columns='tx_date,vend_name,account_name,subt_nat_amount'). For ranking vendors by spend, use get_expenses_by_vendor instead (it returns inline).",
       inputSchema: {
         ...dateRange,
         accounting_method: accountingMethod,

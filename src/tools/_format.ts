@@ -33,9 +33,16 @@ export function definedOnly<T extends Record<string, unknown>>(
 }
 
 export interface FlatReport {
-  /** Column keys present on every row (includes the carried "group"). */
+  /** Column keys each row/total array is aligned to (leading key is "group"). */
   columns: string[];
-  rows: Record<string, string>[];
+  /** Leaf data rows (transactions or leaf accounts), safe to list or sum. */
+  rows: string[][];
+  /**
+   * Subtotal rows (section totals, Gross Profit, Net Income, ...). Kept
+   * separate because they are NOT summable with `rows` — and because an amount
+   * posted directly to a parent account lives only here, never as a leaf row.
+   */
+  totals: string[][];
 }
 
 // QBO report JSON is deeply nested and untyped third-party data, so narrowing
@@ -69,16 +76,32 @@ function reportColumns(report: Record<string, unknown> | undefined): string[] {
   });
 }
 
+/** Build one `[group, ...cells]` array aligned to `colCount` QBO columns. */
+function buildRow(
+  group: string,
+  colData: unknown[],
+  colCount: number,
+): string[] {
+  const cells = [group];
+  for (let index = 0; index < colCount; index += 1) {
+    cells.push(cellValue(colData[index]));
+  }
+  return cells;
+}
+
 /**
  * Recurse the report's row tree. Section rows ({ Header, Rows }) carry their
- * header label down to descendants as `group`; leaf data rows ({ ColData })
- * become one flat record keyed by column title. Summary rows are dropped.
+ * header label down to descendants as `group`; leaf data rows go to `rows`.
+ * Section `Summary` rows and QBO-tagged computed lines (Gross Profit, Net
+ * Income) go to `totals` — dropping them was losing amounts booked directly to
+ * a parent account, since those exist only in the parent's subtotal.
  */
 function flattenRows(
   rowNodes: unknown,
-  columns: string[],
+  colCount: number,
   group: string,
-  out: Record<string, string>[],
+  rows: string[][],
+  totals: string[][],
 ): void {
   if (!Array.isArray(rowNodes)) return;
   for (const node of rowNodes) {
@@ -89,53 +112,62 @@ function flattenRows(
     if (Array.isArray(nested)) {
       const header = asRecord(row.Header)?.ColData;
       const label = Array.isArray(header) ? cellValue(header[0]).trim() : "";
-      flattenRows(nested, columns, label || group, out);
+      const childGroup = label || group;
+      flattenRows(nested, colCount, childGroup, rows, totals);
+      const summary = asRecord(row.Summary)?.ColData;
+      if (Array.isArray(summary)) {
+        totals.push(buildRow(childGroup, summary, colCount));
+      }
       continue;
     }
 
     const colData = row.ColData;
     if (Array.isArray(colData)) {
-      const flat: Record<string, string> = { group };
-      colData.forEach((cell, index) => {
-        flat[columns[index] ?? `col${index}`] = cellValue(cell);
-      });
-      out.push(flat);
+      const computed = typeof row.group === "string" ? row.group.trim() : "";
+      if (computed) {
+        totals.push(buildRow(computed, colData, colCount));
+      } else {
+        rows.push(buildRow(group, colData, colCount));
+      }
     }
   }
 }
 
 /**
  * Flatten a QBO report (Header + Columns + nested Rows) into compact tabular
- * rows, dropping MetaData/ColType/id wrappers. ~70%+ of a raw report's tokens
- * are this scaffolding; flattening removes it while preserving the grouping.
+ * arrays, dropping MetaData/ColType/id wrappers. Rows are arrays aligned to a
+ * single `columns` header (no per-row key repetition), and subtotals are kept
+ * in `totals` so the result stays lossless.
  */
 export function flattenReport(report: unknown): FlatReport {
   const root = asRecord(report);
   const columns = reportColumns(root);
-  const rows: Record<string, string>[] = [];
-  flattenRows(asRecord(root?.Rows)?.Row, columns, "", rows);
-  return { columns: ["group", ...columns], rows };
+  const rows: string[][] = [];
+  const totals: string[][] = [];
+  flattenRows(asRecord(root?.Rows)?.Row, columns.length, "", rows, totals);
+  return { columns: ["group", ...columns], rows, totals };
 }
 
 /**
  * Shape a report for return: `raw` passes the QBO JSON through untouched;
- * otherwise flatten to compact rows and apply an optional row cap, returning a
- * truncation envelope when the cap is hit.
+ * otherwise flatten to compact arrays and apply an optional cap on `rows`,
+ * returning a truncation envelope (totals are kept) when the cap is hit.
  */
 export function shapeReport(
   report: unknown,
   opts: { format?: "compact" | "raw"; maxRows?: number } = {},
 ): unknown {
   if (opts.format === "raw") return report;
-  const { columns, rows } = flattenReport(report);
+  const { columns, rows, totals } = flattenReport(report);
   if (typeof opts.maxRows === "number" && rows.length > opts.maxRows) {
     return {
       columns,
       rows: rows.slice(0, opts.maxRows),
+      totals,
       truncated: true,
       returned: opts.maxRows,
-      hint: "Result truncated. Narrow the date range, add account_type, or use get_expenses_by_vendor for vendor totals.",
+      hint: "Result truncated. Narrow the date range, add a filter/columns, or use get_expenses_by_vendor for vendor totals.",
     };
   }
-  return { columns, rows };
+  return { columns, rows, totals };
 }

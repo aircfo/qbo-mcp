@@ -74,10 +74,13 @@ All data tools are read-only; the only state-changing tool is `disconnect_quickb
 `get_balance_sheet`, `get_cash_flow`, `get_trial_balance`, `get_general_ledger`,
 `get_expenses_by_vendor`, `get_vendor_balance`, `get_vendor_balance_detail`,
 `get_transactions_by_vendor`, `get_aged_receivables`, `get_aged_payables`.
-Report tools return flattened rows by default (`format: "compact"`) to stay
-token-cheap; pass `format: "raw"` for the full QBO JSON. Detail reports accept
-`max_rows` (default 5000). For ranking vendors by spend, `get_expenses_by_vendor`
-answers it in one call — prefer it over the general ledger.
+Report tools return a compact, lossless shape by default
+(`{ columns, rows, totals }` — array rows aligned to one header; `totals` keeps
+section subtotals so amounts posted directly to a parent account aren't lost).
+Pass `format: "raw"` for the full QBO JSON. Detail reports accept `max_rows`
+(default 5000, caps `rows`). A full unfiltered month of general ledger is large
+regardless — narrow it with `columns`/filters, or use `get_expenses_by_vendor`
+for vendor spend (one call, returns inline).
 
 **Ledger read/search** (a `search_*` + `get_*` pair each): accounts, journal
 entries, invoices, bills, vendors, customers, items, payments — e.g.
