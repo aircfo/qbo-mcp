@@ -119,3 +119,63 @@ cash flow, expenses by vendor) where QBO honors it.
 Also confirmed end to end: the lossless `{ columns, rows, totals }` fix reconciles
 exactly (Mar/Apr/May COGS+Expenses match to the dollar; the ~$40k/month of
 parent-posted money is recovered via `totals`).
+
+## 2026-06-26 — `search_*` tools: bounded by default + compact list-view projection
+
+A Cowork beta tester's setup errored mid-run: `search_accounts` on a 257-account
+chart returned ~132 KB and blew the response limit. Root cause was two-fold —
+`buildCriteria` only sent a `limit` when the caller passed one (the Zod
+"default 100" was description-only, never applied), so an omitted limit became QBO's
+"return the whole table"; and search returned full `slimEntity` objects
+(`MetaData`, `CurrencyRef`, line arrays, etc., ~500 chars/row).
+
+**Decision:** mirror the report-tool shaping on the ledger search path
+(`_search.ts`, `ledger.ts`):
+
+- **Never unbounded.** `buildCriteria` always appends `limit: args.limit ??
+  DEFAULT_LIMIT` (100). The guarantee lives in the pure chokepoint, not in the
+  model remembering to pass a limit.
+- **Compact projection is the default.** Each entity declares `projectionFields`;
+  search returns only those (a "list view"). `get_<entity>` stays the full-detail
+  path, and `format: "full"` on search is the escape hatch. Applied to all 8
+  search tools (invoices/bills/payments carry heavy line arrays too), not just
+  accounts. Journal-entry search drops its lines — description now points to
+  `get_journal_entry` for them.
+- **Paging envelope.** Returns `{ count, results, truncated, next_offset, hint }`
+  when the page comes back full. Unlike `shapeReport` (which sees the whole set
+  then slices), search applies the limit at the QBO query layer, so truncation is
+  *inferred* from `results.length >= limit` — a heuristic whose worst case is one
+  extra empty page.
+
+A **behavior change** for callers parsing full search objects; `format: "full"`
+and `get_<entity>` both recover the old shape. For a whole COA in one call, the
+description tells the model to raise `limit` (compact 257 rows ≈ 26 KB).
+
+## 2026-06-26 — Connect-flow hardening for the public/Cowork surface
+
+Three connect-time issues surfaced in the same beta test.
+
+**Decision:**
+
+- **OAuth callback shows a success interstitial, not a blind 302.** The QBO
+  connection is created server-side *before* the redirect, so the only thing that
+  fails when the MCP client's loopback (`localhost:3118`) is unreachable is
+  delivery of the auth code — but the user saw a raw "Safari can't connect" dead
+  end. `intuit-callback.ts` now renders a "✅ QuickBooks connected" page that
+  auto-redirects via top-level `meta refresh` (not a subresource — avoids
+  https→http-localhost mixed-content blocking), keeps a clickable "Return to
+  Claude" link, and reassures that the connection succeeded even if the redirect
+  errors. The redirect *destination* remains a client/transport concern we can't
+  fully control.
+- **Scope coherence.** The server granted the Intuit scope
+  `com.intuit.quickbooks.accounting` as the MCP token scope while advertising no
+  `scopes_supported` — a mismatch that can read as "Unavailable scope was
+  requested." Upstream Intuit is requested correctly (`intuit-oauth.ts`), so this
+  is purely the MCP metadata layer. Exported `SCOPE` from `provider.ts` and passed
+  `scopesSupported: [SCOPE]` to `mcpAuthRouter` so advertised == granted. (Still
+  worth reproducing with the MCP Inspector to confirm the error was this server.)
+- **Distinct branding.** `resourceName` and the server `name` were generic
+  ("QuickBooks Online MCP" / "qbo-mcp") and collided with Intuit's official
+  connector in Cowork. Renamed both to "airCFO QuickBooks" (and the connect-page
+  title/heading) so it's unmistakable. The plugin-side `.mcp.json` key + README
+  in the `claude-startup-finance` repo still need the matching rename.

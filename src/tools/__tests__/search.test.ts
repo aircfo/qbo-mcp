@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCriteria,
+  DEFAULT_LIMIT,
   extractList,
+  projectEntity,
+  shapeSearchResults,
   slimEntity,
   validateFields,
 } from "../_search.js";
 
 describe("buildCriteria", () => {
-  it("returns an empty object when there are no args (fetch all)", () => {
-    expect(buildCriteria({})).toEqual({});
+  it("applies the default limit when there are no args (never unbounded)", () => {
+    expect(buildCriteria({})).toEqual([
+      { field: "limit", value: DEFAULT_LIMIT },
+    ]);
   });
 
   it("maps filters to field/value/operator, defaulting the operator to '='", () => {
@@ -22,6 +27,7 @@ describe("buildCriteria", () => {
     ).toEqual([
       { field: "Balance", value: 0, operator: ">" },
       { field: "Active", value: true, operator: "=" },
+      { field: "limit", value: DEFAULT_LIMIT },
     ]);
   });
 
@@ -40,10 +46,68 @@ describe("buildCriteria", () => {
     ]);
   });
 
-  it("uses 'asc' when sort_desc is not set", () => {
+  it("uses 'asc' when sort_desc is not set, still bounded by the default limit", () => {
     expect(buildCriteria({ sort_by: "Name" })).toEqual([
       { field: "asc", value: "Name" },
+      { field: "limit", value: DEFAULT_LIMIT },
     ]);
+  });
+});
+
+describe("projectEntity", () => {
+  it("keeps only the listed fields", () => {
+    const account = {
+      Id: "33",
+      Name: "Checking",
+      AccountType: "Bank",
+      MetaData: { CreateTime: "2020-01-01" },
+      CurrencyRef: { value: "USD" },
+    };
+    expect(projectEntity(account, ["Id", "Name", "AccountType"])).toEqual({
+      Id: "33",
+      Name: "Checking",
+      AccountType: "Bank",
+    });
+  });
+
+  it("omits listed fields that are absent rather than emitting undefined", () => {
+    expect(projectEntity({ Id: "1" }, ["Id", "AcctNum"])).toEqual({ Id: "1" });
+  });
+
+  it("passes through non-objects unchanged", () => {
+    expect(projectEntity(null, ["Id"])).toBeNull();
+  });
+});
+
+describe("shapeSearchResults", () => {
+  it("returns a plain count/results envelope when under the limit", () => {
+    const rows = [{ Id: "1" }, { Id: "2" }];
+    expect(shapeSearchResults(rows, { limit: 10 })).toEqual({
+      count: 2,
+      results: rows,
+    });
+  });
+
+  it("flags truncation and a next_offset when the page comes back full", () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({ Id: String(i) }));
+    const env = shapeSearchResults(rows, { limit: 5 });
+    expect(env.truncated).toBe(true);
+    expect(env.next_offset).toBe(6);
+    expect(env.hint).toContain("offset=6");
+  });
+
+  it("advances next_offset from the current offset", () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({ Id: String(i) }));
+    expect(shapeSearchResults(rows, { limit: 5, offset: 11 }).next_offset).toBe(
+      16,
+    );
+  });
+
+  it("uses the default limit to detect truncation when none is passed", () => {
+    const rows = Array.from({ length: DEFAULT_LIMIT }, (_, i) => ({
+      Id: String(i),
+    }));
+    expect(shapeSearchResults(rows, {}).truncated).toBe(true);
   });
 });
 

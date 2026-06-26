@@ -5,7 +5,9 @@ import { promisify, toolError } from "./_format.js";
 import {
   buildCriteria,
   extractList,
+  projectEntity,
   searchInput,
+  shapeSearchResults,
   slimEntity,
   validateFields,
   type SearchArgs,
@@ -23,6 +25,8 @@ interface EntitySpec {
   queryKey: string;
   /** Allowlist of fields a caller may filter/sort on. */
   filterFields: readonly string[];
+  /** Fields kept in the compact "list view" returned by the search tool. */
+  projectionFields: readonly string[];
   finder: (qb: QuickBooks, criteria: object, cb: QboCb) => void;
   getter: (qb: QuickBooks, id: string, cb: QboCb) => void;
   searchDescription: string;
@@ -44,8 +48,12 @@ function registerEntity(
         const res = await promisify((cb) =>
           spec.finder(qb, buildCriteria(args), cb),
         );
-        const results = extractList(res, spec.queryKey).map(slimEntity);
-        return { count: results.length, results };
+        const raw = extractList(res, spec.queryKey);
+        const results =
+          args.format === "full"
+            ? raw.map(slimEntity)
+            : raw.map((entity) => projectEntity(entity, spec.projectionFields));
+        return shapeSearchResults(results, args);
       });
     },
   );
@@ -77,10 +85,21 @@ const ENTITIES: EntitySpec[] = [
       "Active",
       "CurrentBalance",
     ],
+    projectionFields: [
+      "Id",
+      "Name",
+      "AcctNum",
+      "AccountType",
+      "AccountSubType",
+      "Classification",
+      "Active",
+      "CurrentBalance",
+      "ParentRef",
+    ],
     finder: (qb, c, cb) => qb.findAccounts(c, cb),
     getter: (qb, id, cb) => qb.getAccount(id, cb),
     searchDescription:
-      "Search the chart of accounts. Filterable fields: Name, AccountType, AccountSubType, Classification, Active, CurrentBalance. Use to find account ids for the general ledger or to review the COA.",
+      "Search the chart of accounts. Filterable fields: Name, AccountType, AccountSubType, Classification, Active, CurrentBalance. Use to find account ids for the general ledger or to review the COA. Returns up to 100 compact rows by default; to pull a full chart in one call, pass a higher limit (max 1000). Use get_account for an account's full detail.",
     getDescription:
       "Fetch one account from the chart of accounts by its QBO id.",
   },
@@ -89,10 +108,11 @@ const ENTITIES: EntitySpec[] = [
     getName: "get_journal_entry",
     queryKey: "JournalEntry",
     filterFields: ["Id", "TxnDate", "DocNumber", "Adjust", "PrivateNote"],
+    projectionFields: ["Id", "TxnDate", "DocNumber", "Adjust", "PrivateNote"],
     finder: (qb, c, cb) => qb.findJournalEntries(c, cb),
     getter: (qb, id, cb) => qb.getJournalEntry(id, cb),
     searchDescription:
-      "Search journal entries. Filterable fields: TxnDate, DocNumber, Adjust, PrivateNote. Each result includes the JE header and its debit/credit lines.",
+      "Search journal entries. Filterable fields: TxnDate, DocNumber, Adjust, PrivateNote. Returns compact header rows; use get_journal_entry for an entry's debit/credit lines.",
     getDescription: "Fetch one journal entry (header + lines) by its QBO id.",
   },
   {
@@ -100,6 +120,15 @@ const ENTITIES: EntitySpec[] = [
     getName: "get_invoice",
     queryKey: "Invoice",
     filterFields: [
+      "Id",
+      "DocNumber",
+      "TxnDate",
+      "DueDate",
+      "CustomerRef",
+      "Balance",
+      "TotalAmt",
+    ],
+    projectionFields: [
       "Id",
       "DocNumber",
       "TxnDate",
@@ -127,6 +156,15 @@ const ENTITIES: EntitySpec[] = [
       "Balance",
       "TotalAmt",
     ],
+    projectionFields: [
+      "Id",
+      "TxnDate",
+      "DueDate",
+      "DocNumber",
+      "VendorRef",
+      "Balance",
+      "TotalAmt",
+    ],
     finder: (qb, c, cb) => qb.findBills(c, cb),
     getter: (qb, id, cb) => qb.getBill(id, cb),
     searchDescription:
@@ -139,6 +177,7 @@ const ENTITIES: EntitySpec[] = [
     getName: "get_vendor",
     queryKey: "Vendor",
     filterFields: ["Id", "DisplayName", "CompanyName", "Active", "Balance"],
+    projectionFields: ["Id", "DisplayName", "CompanyName", "Active", "Balance"],
     finder: (qb, c, cb) => qb.findVendors(c, cb),
     getter: (qb, id, cb) => qb.getVendor(id, cb),
     searchDescription:
@@ -150,6 +189,7 @@ const ENTITIES: EntitySpec[] = [
     getName: "get_customer",
     queryKey: "Customer",
     filterFields: ["Id", "DisplayName", "CompanyName", "Active", "Balance"],
+    projectionFields: ["Id", "DisplayName", "CompanyName", "Active", "Balance"],
     finder: (qb, c, cb) => qb.findCustomers(c, cb),
     getter: (qb, id, cb) => qb.getCustomer(id, cb),
     searchDescription:
@@ -161,6 +201,7 @@ const ENTITIES: EntitySpec[] = [
     getName: "get_item",
     queryKey: "Item",
     filterFields: ["Id", "Name", "Type", "Active", "UnitPrice"],
+    projectionFields: ["Id", "Name", "Type", "Active", "UnitPrice"],
     finder: (qb, c, cb) => qb.findItems(c, cb),
     getter: (qb, id, cb) => qb.getItem(id, cb),
     searchDescription:
@@ -172,6 +213,13 @@ const ENTITIES: EntitySpec[] = [
     getName: "get_payment",
     queryKey: "Payment",
     filterFields: ["Id", "TxnDate", "CustomerRef", "TotalAmt"],
+    projectionFields: [
+      "Id",
+      "TxnDate",
+      "CustomerRef",
+      "TotalAmt",
+      "UnappliedAmt",
+    ],
     finder: (qb, c, cb) => qb.findPayments(c, cb),
     getter: (qb, id, cb) => qb.getPayment(id, cb),
     searchDescription:

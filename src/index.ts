@@ -3,6 +3,7 @@ import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { env } from "./config/env.js";
 import { oauthProvider } from "./deps.js";
+import { SCOPE } from "./auth/provider.js";
 import { connectStartHandler } from "./auth/connect-start.js";
 import { intuitCallbackHandler } from "./auth/intuit-callback.js";
 import { log } from "./log.js";
@@ -91,7 +92,8 @@ app.use(
     provider: oauthProvider,
     issuerUrl: baseUrl,
     baseUrl,
-    resourceName: "QuickBooks Online MCP",
+    resourceName: "airCFO QuickBooks",
+    scopesSupported: [SCOPE],
   }),
 );
 
