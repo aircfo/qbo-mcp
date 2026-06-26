@@ -10,6 +10,51 @@ function errorPage(message: string): string {
   </body></html>`;
 }
 
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Shown after the QuickBooks connection is created, instead of a blind 302 back
+ * to the MCP client's loopback. The redirect *destination* (the desktop app's
+ * local listener) is outside our control and can be unreachable at this instant
+ * — a blind 302 then dead-ends the browser on a raw "can't connect" error. So
+ * we render a success page first (top-level meta-refresh auto-attempts the
+ * handoff after a beat, which Safari handles more reliably than an auto-302),
+ * keep a user-clickable link, and reassure the user the connection already
+ * succeeded even if the redirect itself errors.
+ */
+function successPage(redirectUrl: string): string {
+  const safeUrl = escapeAttr(redirectUrl);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="refresh" content="2;url=${safeUrl}" />
+  <title>QuickBooks connected</title>
+</head>
+<body style="font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center">
+  <main style="background:#fff;max-width:420px;width:90%;padding:32px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.1);text-align:center">
+    <div style="font-size:40px;line-height:1">✅</div>
+    <h1 style="font-size:20px;margin:12px 0 8px">QuickBooks connected</h1>
+    <p style="color:#555;font-size:14px;margin:0 0 24px">Returning you to Claude…</p>
+    <a href="${safeUrl}"
+      style="display:inline-block;width:100%;box-sizing:border-box;padding:12px;font-size:15px;font-weight:600;color:#fff;background:#2ca01c;border-radius:8px;text-decoration:none">
+      Return to Claude
+    </a>
+    <p style="color:#888;font-size:12px;margin:20px 0 0">
+      If this page shows a connection error, your QuickBooks connection still succeeded — go back to Claude and try your request again.
+    </p>
+  </main>
+</body>
+</html>`;
+}
+
 /**
  * Intuit's OAuth redirect lands here. We match it to the pending MCP
  * authorization (via the opaque `state`), exchange Intuit's code for tokens +
@@ -76,9 +121,12 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
     const redirect = new URL(pending.redirectUri);
     redirect.searchParams.set("code", authCode);
     if (pending.mcpState) redirect.searchParams.set("state", pending.mcpState);
-    res.redirect(redirect.toString());
+    res.type("html").send(successPage(redirect.toString()));
   } catch (err) {
-    console.error("[intuit-callback] token exchange failed:", err);
+    log.error(
+      { err: err instanceof Error ? err.stack : String(err) },
+      "intuit_callback_exchange_failed",
+    );
     res
       .status(502)
       .type("html")

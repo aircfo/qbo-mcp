@@ -46,11 +46,11 @@ export function renderConnectPage(params: ConnectPageParams): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Connect QuickBooks</title>
+  <title>Connect airCFO QuickBooks</title>
 </head>
 <body style="font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center">
   <main style="background:#fff;max-width:420px;width:90%;padding:32px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.1)">
-    <h1 style="font-size:20px;margin:0 0 8px">Connect QuickBooks</h1>
+    <h1 style="font-size:20px;margin:0 0 8px">Connect airCFO QuickBooks</h1>
     <p style="color:#555;font-size:14px;margin:0 0 24px">
       Enter your email, then you'll be sent to QuickBooks to authorize access to your company's data.
     </p>

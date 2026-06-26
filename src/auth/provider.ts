@@ -17,7 +17,13 @@ import type {
 import type { OAuthStore } from "./oauth-store.js";
 import { renderConnectPage } from "./connect-page.js";
 
-const SCOPE = "com.intuit.quickbooks.accounting";
+/**
+ * The single scope this server grants. Exported so the OAuth metadata
+ * (`scopesSupported` in index.ts) advertises exactly what the provider issues —
+ * advertising nothing while granting this string is the scope incoherence that
+ * can surface as "Unavailable scope was requested" on connect.
+ */
+export const SCOPE = "com.intuit.quickbooks.accounting";
 
 /**
  * Bridges the MCP OAuth surface (Claude ↔ this server) to Intuit's OAuth
