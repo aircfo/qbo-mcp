@@ -66,7 +66,7 @@ export function renderConnectPage(params: ConnectPageParams): string {
   <main style="background:#fff;max-width:420px;width:90%;padding:32px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.1)">
     <h1 style="font-size:20px;margin:0 0 8px">Connect airCFO QBO Gateway</h1>
     <p style="color:#555;font-size:14px;margin:0 0 16px">
-      Enter your email, then you'll continue to Intuit's own QuickBooks sign-in to authorize read-only access for your company.
+      Enter your email, then you'll continue to Intuit's own QuickBooks sign-in to authorize the connection for your company. Whatever access Intuit's screen describes, this connector only ever reads.
     </p>
     ${assurances()}
     ${errorHtml}

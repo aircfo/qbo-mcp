@@ -1,4 +1,4 @@
-remote_theme: just-the-docs/just-the-docs
+remote_theme: just-the-docs/just-the-docs@v0.12.0
 title: airCFO QBO Gateway
 description: Talk to your QuickBooks in plain English — a secure, read-only connector for Claude, built by airCFO.
 url: https://aircfo.github.io

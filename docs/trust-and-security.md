@@ -2,6 +2,8 @@
 layout: default
 title: Trust & security
 nav_order: 4
+# The connect page links here by this exact URL — keep it stable.
+permalink: /trust-and-security.html
 ---
 
 # Trust & security
