@@ -31,6 +31,18 @@ declare module "node-quickbooks" {
     reportVendorBalance(options: object, callback: QboCallback): void;
     reportVendorBalanceDetail(options: object, callback: QboCallback): void;
     reportTransactionListByVendor(options: object, callback: QboCallback): void;
+    reportAgedReceivableDetail(options: object, callback: QboCallback): void;
+    reportAgedPayableDetail(options: object, callback: QboCallback): void;
+    reportCustomerSales(options: object, callback: QboCallback): void;
+    reportItemSales(options: object, callback: QboCallback): void;
+    reportClassSales(options: object, callback: QboCallback): void;
+    reportCustomerBalance(options: object, callback: QboCallback): void;
+    reportCustomerBalanceDetail(options: object, callback: QboCallback): void;
+    reportTransactionList(options: object, callback: QboCallback): void;
+    reportTransactionListByCustomer(
+      options: object,
+      callback: QboCallback,
+    ): void;
 
     // Ledger read/search (Batch B). find* take a criteria object/array and
     // return { QueryResponse: { <Entity>: [...] } }; get* take an id.
@@ -50,5 +62,7 @@ declare module "node-quickbooks" {
     getItem(id: string, callback: QboCallback): void;
     findPayments(criteria: object, callback: QboCallback): void;
     getPayment(id: string, callback: QboCallback): void;
+    findClasses(criteria: object, callback: QboCallback): void;
+    getClass(id: string, callback: QboCallback): void;
   }
 }

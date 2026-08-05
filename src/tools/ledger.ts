@@ -209,6 +209,25 @@ const ENTITIES: EntitySpec[] = [
     getDescription: "Fetch one product/service item by its QBO id.",
   },
   {
+    searchName: "search_classes",
+    getName: "get_class",
+    queryKey: "Class",
+    filterFields: ["Id", "Name", "FullyQualifiedName", "Active"],
+    projectionFields: [
+      "Id",
+      "Name",
+      "FullyQualifiedName",
+      "SubClass",
+      "ParentRef",
+      "Active",
+    ],
+    finder: (qb, c, cb) => qb.findClasses(c, cb),
+    getter: (qb, id, cb) => qb.getClass(id, cb),
+    searchDescription:
+      "Search classes (QBO's transaction tagging dimension). Filterable fields: Name, FullyQualifiedName, Active. Use to find class ids for class filters on reports like get_profit_and_loss and get_sales_by_class. Only useful when the company has class tracking enabled.",
+    getDescription: "Fetch one class by its QBO id.",
+  },
+  {
     searchName: "search_payments",
     getName: "get_payment",
     queryKey: "Payment",
