@@ -47,6 +47,15 @@ const envSchema = z.object({
   // references them; when unset, the page shows a generic data-access notice.
   TERMS_URL: z.string().url().optional(),
   PRIVACY_URL: z.string().url().optional(),
+
+  // Public user guide (GitHub Pages). Linked from the connect page and served
+  // as the redirect target for the bare server root. Normalized to a trailing
+  // slash because links are composed as `${DOCS_URL}page.html`.
+  DOCS_URL: z
+    .string()
+    .url()
+    .default("https://aircfo.github.io/qbo-mcp/")
+    .transform((u) => (u.endsWith("/") ? u : `${u}/`)),
 });
 
 export type Env = z.infer<typeof envSchema>;

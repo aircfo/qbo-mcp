@@ -179,3 +179,21 @@ Three connect-time issues surfaced in the same beta test.
   connector in Cowork. Renamed both to "airCFO QuickBooks" (and the connect-page
   title/heading) so it's unmistakable. The plugin-side `.mcp.json` key + README
   in the `claude-startup-finance` repo still need the matching rename.
+
+## 2026-08-05 — Public user guide via GitHub Pages; honest connect-page assurances
+
+Preparing for external consumption (pushing non-airCFO users toward the tool):
+
+- **User guide published from `docs/` via GitHub Pages** (just-the-docs theme,
+  `aircfo.github.io/qbo-mcp`). The repo stays private; only the rendered site is
+  public. `SECURITY.md` is published verbatim as a page (`docs/security-details.md`,
+  manual copy — sync note at the top of `SECURITY.md`) because the honest
+  threat-model writeup is itself a trust signal.
+- **Connect-page assurance wording is deliberately scoped to "through this
+  tool."** We say airCFO *cannot view your books through this tool* (true: tool
+  access is bound to the user's own Claude connection) — NOT "airCFO can never
+  access your data" (false: we custody encrypted tokens on our infrastructure,
+  disclosed in the trust docs). Keep any future marketing copy inside that line.
+- **Bare server root now redirects to the user guide** (`DOCS_URL` env, defaults
+  to the Pages URL) so pasting the connector URL into a browser lands somewhere
+  legit instead of a 404.
