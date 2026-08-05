@@ -29,10 +29,23 @@ const accountingMethod = z
     "Cash or Accrual basis. Omit to use the company's default report basis.",
   );
 const summarizeBy = z
-  .enum(["Total", "Days", "Week", "Month", "Quarter", "Year"])
+  .enum([
+    "Total",
+    "Days",
+    "Week",
+    "Month",
+    "Quarter",
+    "Year",
+    "Customers",
+    "Vendors",
+    "Classes",
+    "Departments",
+    "Employees",
+    "ProductsAndServices",
+  ])
   .optional()
   .describe(
-    "Split the report into columns by this period (e.g. Month for a monthly trend).",
+    "Split the report into columns by this period or dimension (e.g. Month for a monthly trend, Classes for a per-class breakout).",
   );
 const formatParam = z
   .enum(["compact", "raw"])
@@ -48,6 +61,72 @@ const maxRowsParam = z
   .describe(
     `Cap on returned rows in compact mode (default ${DEFAULT_MAX_ROWS}). When exceeded, rows are truncated and a hint is returned.`,
   );
+
+// Aging-detail params shared by the A/R and A/P detail reports. QBO's detail
+// reports name the bucket width `aging_period` (the summaries use a different
+// param set), so that name is kept verbatim here.
+const agingDetail = {
+  report_date: z
+    .string()
+    .optional()
+    .describe("As-of date, YYYY-MM-DD. Defaults to today."),
+  num_periods: z
+    .number()
+    .int()
+    .optional()
+    .describe("Number of aging buckets (default 4)."),
+  aging_period: z
+    .number()
+    .optional()
+    .describe("Bucket width in days (default 30)."),
+  past_due: z
+    .number()
+    .int()
+    .optional()
+    .describe("Only rows at least this many days past due."),
+  start_duedate: z
+    .string()
+    .optional()
+    .describe("Only rows due on/after this date, YYYY-MM-DD."),
+  end_duedate: z
+    .string()
+    .optional()
+    .describe("Only rows due on/before this date, YYYY-MM-DD."),
+  columns: z
+    .string()
+    .optional()
+    .describe(
+      "Comma-separated columns to return (e.g. 'tx_date,txn_type,doc_num,due_date,memo'). Fewer columns = smaller payload.",
+    ),
+};
+
+// Sales summary reports (by customer / product / class) share one param set.
+const salesSummary = {
+  ...dateRange,
+  accounting_method: accountingMethod,
+  summarize_column_by: summarizeBy,
+  customer: z
+    .string()
+    .optional()
+    .describe("Filter to a customer by QBO id (comma-separated for several)."),
+  item: z
+    .string()
+    .optional()
+    .describe(
+      "Filter to a product/service by QBO id (comma-separated for several).",
+    ),
+  class: z
+    .string()
+    .optional()
+    .describe("Filter to a class by QBO id (comma-separated for several)."),
+  department: z
+    .string()
+    .optional()
+    .describe(
+      "Filter to a department/location by QBO id (comma-separated for several).",
+    ),
+  format: formatParam,
+};
 
 /**
  * Run a report call against the connection's QBO client and shape the result.
@@ -342,7 +421,7 @@ export function registerReportTools(
     "get_aged_receivables",
     {
       description:
-        "A/R Aging Summary: outstanding customer balances bucketed by age (current, 1-30, 31-60, 61-90, 90+). Shows who owes you and how overdue.",
+        "A/R Aging Summary: outstanding customer balances bucketed by age (current, 1-30, 31-60, 61-90, 90+). Shows who owes you and how overdue. Use get_aged_receivables_detail for the individual invoices behind each bucket.",
       inputSchema: {
         report_date: z
           .string()
@@ -379,7 +458,7 @@ export function registerReportTools(
     "get_aged_payables",
     {
       description:
-        "A/P Aging Summary: outstanding vendor bills bucketed by age. Shows what you owe and how overdue.",
+        "A/P Aging Summary: outstanding vendor bills bucketed by age. Shows what you owe and how overdue. Use get_aged_payables_detail for the individual bills behind each bucket.",
       inputSchema: {
         report_date: z
           .string()
@@ -409,6 +488,314 @@ export function registerReportTools(
     async (args) =>
       runReport(connectionId, args, (qb, p, cb) =>
         qb.reportAgedPayables(p, cb),
+      ),
+  );
+
+  server.registerTool(
+    "get_aged_receivables_detail",
+    {
+      description:
+        "A/R Aging Detail: every open invoice with its customer, due date, age bucket, and open balance. The invoice-level drill-down behind the A/R aging summary — use for collections lists like 'which invoices are 60+ days past due'.",
+      inputSchema: {
+        ...agingDetail,
+        aging_method: z
+          .enum(["Current", "Report_Date"])
+          .optional()
+          .describe("Age relative to today (Current) or to the report date."),
+        customer: z
+          .string()
+          .optional()
+          .describe(
+            "Limit to a customer by QBO id (comma-separated for several).",
+          ),
+        format: formatParam,
+        max_rows: maxRowsParam,
+      },
+    },
+    async (args) =>
+      runReport(
+        connectionId,
+        args,
+        (qb, p, cb) => qb.reportAgedReceivableDetail(p, cb),
+        DEFAULT_MAX_ROWS,
+      ),
+  );
+
+  server.registerTool(
+    "get_aged_payables_detail",
+    {
+      description:
+        "A/P Aging Detail: every open bill with its vendor, due date, age bucket, and open balance. The bill-level drill-down behind the A/P aging summary — use to build a payment run or see exactly which bills are overdue.",
+      inputSchema: {
+        ...agingDetail,
+        accounting_method: accountingMethod,
+        vendor: z
+          .string()
+          .optional()
+          .describe(
+            "Limit to a vendor by QBO id (comma-separated for several).",
+          ),
+        format: formatParam,
+        max_rows: maxRowsParam,
+      },
+    },
+    async (args) =>
+      runReport(
+        connectionId,
+        args,
+        (qb, p, cb) => qb.reportAgedPayableDetail(p, cb),
+        DEFAULT_MAX_ROWS,
+      ),
+  );
+
+  server.registerTool(
+    "get_sales_by_customer",
+    {
+      description:
+        "Sales by Customer Summary: total sales grouped by customer for the period. Use summarize_column_by: Month for a per-month breakout (e.g. top customers by month). The direct way to rank customers by revenue.",
+      inputSchema: salesSummary,
+    },
+    async (args) =>
+      runReport(connectionId, args, (qb, p, cb) =>
+        qb.reportCustomerSales(p, cb),
+      ),
+  );
+
+  server.registerTool(
+    "get_sales_by_product",
+    {
+      description:
+        "Sales by Product/Service Summary: quantity and amount sold per product/service item for the period. This item-level view exists only on sales lines — it cannot be derived from the general ledger.",
+      inputSchema: salesSummary,
+    },
+    async (args) =>
+      runReport(connectionId, args, (qb, p, cb) => qb.reportItemSales(p, cb)),
+  );
+
+  server.registerTool(
+    "get_sales_by_class",
+    {
+      description:
+        "Sales by Class Summary: total sales grouped by class for the period. Only meaningful when the company tracks classes — use search_classes to find class ids or check whether any exist.",
+      inputSchema: salesSummary,
+    },
+    async (args) =>
+      runReport(connectionId, args, (qb, p, cb) => qb.reportClassSales(p, cb)),
+  );
+
+  server.registerTool(
+    "get_customer_balance",
+    {
+      description:
+        "Customer Balance Summary: the open A/R balance per customer as of the report date. Use to see who owes you across all customers at a glance; the customer-side mirror of get_vendor_balance.",
+      inputSchema: {
+        report_date: z
+          .string()
+          .optional()
+          .describe("As-of date, YYYY-MM-DD. Defaults to today."),
+        accounting_method: accountingMethod,
+        arpaid: z
+          .enum(["All", "Paid", "Unpaid"])
+          .optional()
+          .describe(
+            "Include all, only paid, or only unpaid A/R (default Unpaid).",
+          ),
+        customer: z
+          .string()
+          .optional()
+          .describe(
+            "Filter to a customer by QBO id (comma-separated for several).",
+          ),
+        department: z
+          .string()
+          .optional()
+          .describe("Filter to a department/location by QBO id."),
+        format: formatParam,
+      },
+    },
+    async (args) =>
+      runReport(connectionId, args, (qb, p, cb) =>
+        qb.reportCustomerBalance(p, cb),
+      ),
+  );
+
+  server.registerTool(
+    "get_customer_balance_detail",
+    {
+      description:
+        "Customer Balance Detail: the individual open invoices and credits behind each customer's balance. The drill-down for what makes up an amount a customer owes.",
+      inputSchema: {
+        report_date: z
+          .string()
+          .optional()
+          .describe("As-of date, YYYY-MM-DD. Defaults to today."),
+        arpaid: z
+          .enum(["All", "Paid", "Unpaid"])
+          .optional()
+          .describe(
+            "Include all, only paid, or only unpaid A/R (default Unpaid).",
+          ),
+        aging_method: z
+          .enum(["Current", "Report_Date"])
+          .optional()
+          .describe("Age relative to today (Current) or to the report date."),
+        start_duedate: z
+          .string()
+          .optional()
+          .describe("Only rows due on/after this date, YYYY-MM-DD."),
+        end_duedate: z
+          .string()
+          .optional()
+          .describe("Only rows due on/before this date, YYYY-MM-DD."),
+        customer: z
+          .string()
+          .optional()
+          .describe(
+            "Filter to a customer by QBO id (comma-separated for several).",
+          ),
+        department: z
+          .string()
+          .optional()
+          .describe("Filter to a department/location by QBO id."),
+        columns: z
+          .string()
+          .optional()
+          .describe(
+            "Comma-separated columns to return (e.g. 'tx_date,txn_type,doc_num,due_date'). Fewer columns = smaller payload.",
+          ),
+        sort_by: z.string().optional().describe("Column to sort by."),
+        format: formatParam,
+        max_rows: maxRowsParam,
+      },
+    },
+    async (args) =>
+      runReport(
+        connectionId,
+        args,
+        (qb, p, cb) => qb.reportCustomerBalanceDetail(p, cb),
+        DEFAULT_MAX_ROWS,
+      ),
+  );
+
+  server.registerTool(
+    "get_transactions_by_customer",
+    {
+      description:
+        "Transaction List by Customer: every transaction (invoices, payments, credit memos) grouped by customer for the period. Use for a line-level audit of activity with a customer; the customer-side mirror of get_transactions_by_vendor.",
+      inputSchema: {
+        ...dateRange,
+        accounting_method: accountingMethod,
+        customer: z
+          .string()
+          .optional()
+          .describe("Filter to one customer by QBO id."),
+        format: formatParam,
+        max_rows: maxRowsParam,
+      },
+    },
+    async (args) =>
+      runReport(
+        connectionId,
+        args,
+        (qb, p, cb) => qb.reportTransactionListByCustomer(p, cb),
+        DEFAULT_MAX_ROWS,
+      ),
+  );
+
+  server.registerTool(
+    "get_transaction_list",
+    {
+      description:
+        "Transaction List: one row per transaction for the period, filterable by transaction_type — the only report that surfaces types with no dedicated tool (checks, credit card charges, deposits, transfers, sales receipts, credit memos, estimates, purchase orders). Use for 'show me all deposits in March' or to find a transaction by exact amount (bothamount).",
+      inputSchema: {
+        ...dateRange,
+        transaction_type: z
+          .enum([
+            "CreditCardCharge",
+            "Check",
+            "Invoice",
+            "ReceivePayment",
+            "JournalEntry",
+            "Bill",
+            "CreditCardCredit",
+            "VendorCredit",
+            "Credit",
+            "BillPaymentCheck",
+            "BillPaymentCreditCard",
+            "Charge",
+            "Transfer",
+            "Deposit",
+            "Statement",
+            "BillableCharge",
+            "TimeActivity",
+            "CashPurchase",
+            "SalesReceipt",
+            "CreditMemo",
+            "CreditRefund",
+            "Estimate",
+            "InventoryQuantityAdjustment",
+            "PurchaseOrder",
+          ])
+          .optional()
+          .describe("Limit to one transaction type."),
+        customer: z
+          .string()
+          .optional()
+          .describe("Filter to a customer by QBO id."),
+        vendor: z.string().optional().describe("Filter to a vendor by QBO id."),
+        department: z
+          .string()
+          .optional()
+          .describe("Filter to a department/location by QBO id."),
+        source_account_type: z
+          .string()
+          .optional()
+          .describe(
+            "Filter by source account type, e.g. 'Bank', 'CreditCard', 'AccountsReceivable', 'Expense'.",
+          ),
+        arpaid: z
+          .enum(["All", "Paid", "Unpaid"])
+          .optional()
+          .describe("A/R paid status (default All)."),
+        appaid: z
+          .enum(["All", "Paid", "Unpaid"])
+          .optional()
+          .describe("A/P paid status (default All)."),
+        cleared: z
+          .enum(["Cleared", "Uncleared", "Reconciled", "Deposited"])
+          .optional()
+          .describe("Bank-clearing status."),
+        docnum: z
+          .string()
+          .optional()
+          .describe("Filter by document/reference number."),
+        bothamount: z
+          .number()
+          .optional()
+          .describe("Match transactions of exactly this amount."),
+        group_by: z
+          .string()
+          .optional()
+          .describe(
+            "Group rows by e.g. 'Name', 'Account', 'Transaction Type', 'Month', or 'None'.",
+          ),
+        sort_by: z.string().optional().describe("Column to sort by."),
+        columns: z
+          .string()
+          .optional()
+          .describe(
+            "Comma-separated columns to return (e.g. 'tx_date,txn_type,doc_num,name,account_name'). Fewer columns = smaller payload.",
+          ),
+        format: formatParam,
+        max_rows: maxRowsParam,
+      },
+    },
+    async (args) =>
+      runReport(
+        connectionId,
+        args,
+        (qb, p, cb) => qb.reportTransactionList(p, cb),
+        DEFAULT_MAX_ROWS,
       ),
   );
 }

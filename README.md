@@ -62,9 +62,10 @@ a volume attaches to one instance, so this assumes a single running instance
 - [x] Live OAuth round-trip verified against Intuit sandbox (connection persisted, encrypted)
 - [x] Batch A — financial reports (read-only): P&L, balance sheet, cash flow, trial balance, general ledger, A/R + A/P aging
 - [x] Batch B — ledger read/search: accounts, journal entries, invoices, bills, vendors, customers, items, payments
+- [x] Batch C — customer-side reports: A/R + A/P aging detail, sales by customer/product/class, customer balances, transaction lists, class lookup
 - [ ] (deferred) Writes — out of scope for read-only v1
 
-## Tools (v1) — 30 total
+## Tools (v1) — 41 total
 
 All data tools are read-only; the only state-changing tool is `disconnect_quickbooks`.
 
@@ -73,7 +74,11 @@ All data tools are read-only; the only state-changing tool is `disconnect_quickb
 **Reports:** `get_profit_and_loss`, `get_profit_and_loss_detail`,
 `get_balance_sheet`, `get_cash_flow`, `get_trial_balance`, `get_general_ledger`,
 `get_expenses_by_vendor`, `get_vendor_balance`, `get_vendor_balance_detail`,
-`get_transactions_by_vendor`, `get_aged_receivables`, `get_aged_payables`.
+`get_transactions_by_vendor`, `get_aged_receivables`, `get_aged_payables`,
+`get_aged_receivables_detail`, `get_aged_payables_detail`,
+`get_sales_by_customer`, `get_sales_by_product`, `get_sales_by_class`,
+`get_customer_balance`, `get_customer_balance_detail`,
+`get_transactions_by_customer`, `get_transaction_list`.
 Report tools return a compact, lossless shape by default
 (`{ columns, rows, totals }` — array rows aligned to one header; `totals` keeps
 section subtotals so amounts posted directly to a parent account aren't lost).
@@ -83,7 +88,7 @@ regardless — narrow it with `columns`/filters, or use `get_expenses_by_vendor`
 for vendor spend (one call, returns inline).
 
 **Ledger read/search** (a `search_*` + `get_*` pair each): accounts, journal
-entries, invoices, bills, vendors, customers, items, payments — e.g.
+entries, invoices, bills, vendors, customers, items, payments, classes — e.g.
 `search_invoices` / `get_invoice`. `search_*` tools take typed `filters`
 (field/operator/value), `limit`, `offset`, and sort; `get_*` take an `id`.
 
