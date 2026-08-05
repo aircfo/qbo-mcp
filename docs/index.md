@@ -1,23 +1,19 @@
 ---
-layout: default
-title: Overview
-nav_order: 1
+title: Talk to Your QuickBooks in Plain English
 permalink: /
 ---
 
-# Talk to your QuickBooks. In plain English.
+<div class="hero" markdown="0">
+  <p class="eyebrow">A QuickBooks connector for Claude, by airCFO</p>
+  <h1>Talk to your QuickBooks. In plain English.</h1>
+  <p class="lede">Connect your QuickBooks Online company to Claude and just ask: <em>"How did margins move from Q1 to Q2?" "What did we spend on software last quarter, by vendor?" "Which customers are more than 60 days past due?"</em> No exports, no pivot tables, no custom report-building.</p>
+  <div class="hero-ctas">
+    <a class="btn btn-primary" href="getting-started.html">Get started</a>
+    <a class="btn btn-secondary" href="mailto:alex@aircfo.com">Request beta access</a>
+  </div>
+</div>
 
-Connect your QuickBooks Online company to Claude and just ask:
-
-> *"How did margins move from Q1 to Q2?"*
-> *"What did we spend on software last quarter, by vendor?"*
-> *"Which customers are more than 60 days past due?"*
-
-No exports. No pivot tables. No custom report-building. You ask, Claude reads the
-QuickBooks data your company has today, and you get an answer with the numbers
-behind it.
-
----
+<p class="credibility" markdown="0">Built by <a href="https://aircfo.com">airCFO</a>, the AI-enabled back-office growth partner for startups — the same connector our own finance team uses on real books.</p>
 
 ## What it is
 
