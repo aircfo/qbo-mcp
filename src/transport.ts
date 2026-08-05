@@ -89,10 +89,13 @@ export const handleMcpPost: RequestHandler = async (req, res) => {
     // Defense-in-depth for a multi-tenant server: a session must be driven by
     // the same connection that created it. Session ids are unguessable, but we
     // never want a token for connection B to operate connection A's session.
+    // Answer 404 (not 403): the spec's expired-session signal makes the client
+    // re-initialize with its own token, and it avoids confirming that the
+    // session id exists under another tenant. A 403 here surfaces to users as
+    // a fatal "blocked by a firewall" permission error after any re-auth or
+    // plugin migration that leaves a live session behind.
     if (existing.connectionId !== connectionId) {
-      res
-        .status(403)
-        .json({ error: "session does not belong to this connection" });
+      res.status(404).json({ error: "session not found" });
       log.warn({ connectionId, sessionId }, "session_connection_mismatch");
       return;
     }
@@ -148,10 +151,13 @@ async function withSession(
     res.status(400).json({ error: "invalid or missing session id" });
     return;
   }
+  // Same ownership guard (and same 404-over-403 reasoning) as handleMcpPost.
   if (session.connectionId !== connectionIdFrom(req)) {
-    res
-      .status(403)
-      .json({ error: "session does not belong to this connection" });
+    res.status(404).json({ error: "session not found" });
+    log.warn(
+      { connectionId: connectionIdFrom(req), sessionId },
+      "session_connection_mismatch",
+    );
     return;
   }
   session.lastActive = Date.now();
