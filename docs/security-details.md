@@ -1,7 +1,14 @@
-# Security
+---
+layout: default
+title: "Security: technical detail"
+nav_order: 5
+---
 
-<!-- Published verbatim on the user guide as docs/security-details.md — after
-     editing this file, re-copy the body there (keep that page's front matter). -->
+> This is the connector's engineering security documentation, published
+> verbatim from the project's `SECURITY.md`. For the plain-language version,
+> see [Trust & security](./trust-and-security.md).
+
+# Security
 
 This document describes the security posture of qbo-mcp: what data it handles,
 how it's protected, the threat model, accepted limitations, and the checklist

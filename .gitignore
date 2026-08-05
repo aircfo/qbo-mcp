@@ -9,3 +9,8 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# Local tool state (never commit)
+.codex/
+.pnpm-store/
+.playwright-mcp/

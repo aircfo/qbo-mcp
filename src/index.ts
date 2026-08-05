@@ -72,6 +72,12 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// A bare visit to the server root (e.g. someone inspecting the connector URL)
+// lands on the user guide instead of a 404.
+app.get("/", (_req, res) => {
+  res.redirect(env.DOCS_URL);
+});
+
 // Connect-page form submit (collects email, then forwards to Intuit). Needs
 // urlencoded body parsing for the HTML form post.
 app.post(

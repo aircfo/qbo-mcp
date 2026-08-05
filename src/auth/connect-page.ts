@@ -27,8 +27,21 @@ function acknowledgment(): string {
     links.push(
       `<a href="${escape(env.PRIVACY_URL)}" target="_blank">Privacy Policy</a>`,
     );
-  const suffix = links.length ? ` and agree to the ${links.join(" and ")}` : "";
-  return `I understand this tool will access my QuickBooks data${suffix}.`;
+  const suffix = links.length
+    ? `, and I agree to the ${links.join(" and ")}`
+    : "";
+  return `I understand this connector gives my own Claude account read-only access to my QuickBooks data — airCFO cannot view my books through this tool, cannot change anything in QuickBooks, and does not store my financial data${suffix}.`;
+}
+
+/** Plain-English assurances shown above the form, linked to the user guide. */
+function assurances(): string {
+  const docsUrl = escape(env.DOCS_URL);
+  return `<ul style="list-style:none;padding:14px 16px;margin:0 0 20px;background:#f5faf5;border:1px solid #dcefdc;border-radius:8px;font-size:13px;color:#333;display:grid;gap:8px">
+      <li>🔒&ensp;<strong>Read-only.</strong> It can never change, add, or delete anything in your books.</li>
+      <li>🗄️&ensp;<strong>Never stored.</strong> Your financial data is fetched live for each answer — airCFO keeps no copy.</li>
+      <li>👤&ensp;<strong>Only you.</strong> Your books are accessible only through your own Claude account — airCFO cannot view your data through this tool.</li>
+    </ul>
+    <p style="font-size:12px;color:#888;margin:0 0 20px">Full details: <a href="${docsUrl}" target="_blank" style="color:#2ca01c">how it works</a> · <a href="${docsUrl}trust-and-security.html" target="_blank" style="color:#2ca01c">trust &amp; security</a></p>`;
 }
 
 /**
@@ -51,9 +64,10 @@ export function renderConnectPage(params: ConnectPageParams): string {
 <body style="font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center">
   <main style="background:#fff;max-width:420px;width:90%;padding:32px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.1)">
     <h1 style="font-size:20px;margin:0 0 8px">Connect airCFO QuickBooks</h1>
-    <p style="color:#555;font-size:14px;margin:0 0 24px">
-      Enter your email, then you'll be sent to QuickBooks to authorize access to your company's data.
+    <p style="color:#555;font-size:14px;margin:0 0 16px">
+      Enter your email, then you'll continue to Intuit's own QuickBooks sign-in to authorize read-only access for your company.
     </p>
+    ${assurances()}
     ${errorHtml}
     <form method="POST" action="/connect/start">
       <input type="hidden" name="client_id" value="${escape(params.clientId)}" />
