@@ -1,7 +1,5 @@
 ---
-layout: default
-title: What you can ask
-nav_order: 3
+title: What You Can Ask
 ---
 
 # What you can ask

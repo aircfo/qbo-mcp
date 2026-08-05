@@ -1,7 +1,5 @@
 ---
-layout: default
-title: "Security: technical detail"
-nav_order: 5
+title: "Security: Technical Detail"
 ---
 
 > This is the connector's engineering security documentation, published
