@@ -98,7 +98,7 @@ app.use(
     provider: oauthProvider,
     issuerUrl: baseUrl,
     baseUrl,
-    resourceName: "airCFO QuickBooks",
+    resourceName: "airCFO QBO Gateway",
     scopesSupported: [SCOPE],
   }),
 );

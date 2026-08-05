@@ -40,6 +40,7 @@ function assurances(): string {
       <li>🔒&ensp;<strong>Read-only.</strong> It can never change, add, or delete anything in your books.</li>
       <li>🗄️&ensp;<strong>Never stored.</strong> Your financial data is fetched live for each answer — airCFO keeps no copy.</li>
       <li>👤&ensp;<strong>Only you.</strong> Your books are accessible only through your own Claude account — airCFO cannot view your data through this tool.</li>
+      <li>🔑&ensp;<strong>What we do store:</strong> one encrypted QuickBooks connection key (never your password), so you don't have to re-authorize every time. It expires on its own after 100 days of inactivity, and you can disconnect at any moment by asking Claude.</li>
     </ul>
     <p style="font-size:12px;color:#888;margin:0 0 20px">Full details: <a href="${docsUrl}" target="_blank" style="color:#2ca01c">how it works</a> · <a href="${docsUrl}trust-and-security.html" target="_blank" style="color:#2ca01c">trust &amp; security</a></p>`;
 }
@@ -59,11 +60,11 @@ export function renderConnectPage(params: ConnectPageParams): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Connect airCFO QuickBooks</title>
+  <title>Connect airCFO QBO Gateway</title>
 </head>
 <body style="font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center">
   <main style="background:#fff;max-width:420px;width:90%;padding:32px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.1)">
-    <h1 style="font-size:20px;margin:0 0 8px">Connect airCFO QuickBooks</h1>
+    <h1 style="font-size:20px;margin:0 0 8px">Connect airCFO QBO Gateway</h1>
     <p style="color:#555;font-size:14px;margin:0 0 16px">
       Enter your email, then you'll continue to Intuit's own QuickBooks sign-in to authorize read-only access for your company.
     </p>

@@ -41,7 +41,7 @@ minimum:
 
 | What | Why we keep it | How it's protected |
 |---|---|---|
-| Your QuickBooks access keys (tokens) | So Claude can fetch data when you ask | **Encrypted at rest** (AES-256-GCM). The key that unlocks them is stored separately from the database. |
+| Your QuickBooks access keys (tokens) | So Claude can fetch data when you ask | **Encrypted at rest** (AES-256-GCM). The key that unlocks them is stored separately from the database, so a leak of the database alone reveals nothing. Intuit expires them automatically after **100 days of inactivity**. |
 | Your QuickBooks company ID, and company name when available | To identify the connection | Not your financial data |
 | The email you enter at connect | A basic accountability signal | Stored as-is; not verified |
 | **Your actual financial data** | We don't keep it | Fetched live and returned to Claude for the answer; not persisted by us |

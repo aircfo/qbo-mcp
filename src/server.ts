@@ -13,7 +13,7 @@ import { registerReportTools } from "./tools/reports.js";
  * read/search (Batch B).
  */
 export function createMcpServer(connectionId: string): McpServer {
-  const server = new McpServer({ name: "airCFO QuickBooks", version: "0.0.1" });
+  const server = new McpServer({ name: "airCFO QBO Gateway", version: "0.0.1" });
   registerCompanyTools(server, connectionId);
   registerReportTools(server, connectionId);
   registerLedgerTools(server, connectionId);

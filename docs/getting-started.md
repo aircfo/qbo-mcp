@@ -40,7 +40,7 @@ You'll need:
    QuickBooks**.
 2. You'll land on **Intuit's own QuickBooks sign-in and consent screen** — the
    same one every approved QuickBooks app uses. Sign in if needed. The app
-   requesting access will show as **airCFO QuickBooks**.
+   requesting access will show as **airCFO QBO Gateway**.
 3. **Choose the company** you want to connect (if you have more than one) and
    click **Connect** / **Authorize**.
 4. QuickBooks sends you back to Claude, and you're connected.
