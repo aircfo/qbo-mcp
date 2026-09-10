@@ -29,28 +29,55 @@ threat model for this system, and it's the kind of judgment that's hard to teach
 You also wrote the argument against your own proposal, and you hedged the write-canary
 idea as *needs verifying* rather than promising it. That's how this should be done.
 
-## The one thing that isn't true any more
+## Switching between clients — you're right, and it is the open problem
 
-Your proposal rests on this:
+This is the friction behind "every monthly refresh needs a live session and a manual
+re-login", and it is real. A connection to the connector binds to **one** QuickBooks
+company, decided at Intuit's consent screen. That binding is what makes cross-client
+isolation airtight — a session cannot reach a company nobody consented to — and it is
+exactly what makes working across a book of clients painful. To move from one client to
+the next you disconnect and reconnect.
 
-> every monthly refresh needs a live session and a manual re-login
+Nothing shipped this week changes that. It is being worked separately, and the state is:
 
-That was real when you wrote it, and it was our bug rather than a property of the
-connector. Sessions were being dropped after thirty minutes and answered in a way that
-left the client unable to recover, so it *looked* like the login had expired. **It was
-fixed and deployed on 2026-09-10.**
+- **In Claude Code it is already solved.** Grants are keyed by *(server name, URL)*, so
+  each client folder declares its own `qbo-<slug>` server, each holds its own grant, and
+  all of them stay authorized at once. Switching clients is switching directories. This
+  was proved by experiment in August and it is how the close work runs today.
+- **On claude.ai and in Cowork it is not**, because claude.ai will not accept the same URL
+  as two connectors under different names. Two options are being evaluated —
+  path-scoped URLs per client, and binding a session to a person with a company selector.
+  Both are written up with their costs in
+  [`multi-client-access.md`](multi-client-access.md).
 
-What's actually true: tokens persist on their own. Ninety days between the connector and
-Claude, a hundred days between the connector and Intuit, and every use pushes both out
-again. Nobody should be logging in monthly. You were one of the people hitting that bug
-hardest, which is exactly why the proposal reads the way it does.
+One footnote, because it will change what you experience day to day: part of the pain you
+felt was a defect of ours rather than the design. Sessions were being dropped after thirty
+minutes and answered in a way that left the client unable to recover, so a working
+connection *looked* like an expired login. That was fixed and deployed on 2026-09-10. The
+switching problem is the part that remains, and it is genuinely unsolved on the surfaces
+you were using.
 
-## Why we're not standing up a second token store
+**For your pipeline, the problem disappears entirely.** A service token addresses a
+company by its realm id, so switching clients is a query parameter rather than a
+reconnection. Your build does not have to wait for any of the above to be decided.
 
-Nearly everything the proposal would build already runs in the QBO connector, and much of
-it was hardened this week:
+## Scheduling — the thing the connector genuinely cannot do
 
-| In the proposal | Already running |
+**Nothing in our stack runs unattended.** The connector is request-driven: it answers
+when something asks, and today the only thing that asks is a person in a Claude session.
+There is no scheduler, no cron, no way to say "pull August for these twelve clients at
+6am on the fourth."
+
+That is the real reason to build what you are proposing, and it is not something the
+connector can grow its way out of by fixing bugs. It is a missing capability, you are the
+one who spotted it, and it is the part worth your time.
+
+## Your build is smaller than it looks, because the token half already exists
+
+Here is the useful news. The connector has been holding multi-client QuickBooks tokens in
+production since May, and most of it was hardened this week:
+
+| In your proposal | Already running |
 |---|---|
 | Encrypted multi-client token store | One row per company, AES-256-GCM, key held apart from the database |
 | OAuth exchange and refresh | Built; Google sign-in added 2026-09-10 |
@@ -60,34 +87,20 @@ it was hardened this week:
 | Audit trail of every pull | One structured line per call, carrying the verified caller |
 | Parent-direct decomposition | Shipped in June — it recovers the amounts QuickBooks folds into subtotal rows, after that omission cost about $40k a month |
 
-The reason not to build a second one isn't the duplicated effort. It's that **two services
-holding write-capable tokens for the same clients means two token stores, two revocation
-paths, and two things to patch** when Intuit changes something. That doubles the custodial
-risk in order to solve a scheduling problem — and custody is the part you rightly call
-existential.
+So the pipeline is not a new platform. It is **a thin layer alongside the connector**: a
+schedule, a transform, and a write into the landing grid. Everything in the table above
+you get for free, including the rotation-race handling that was going to be the most
+dangerous part to write.
 
-## What you found that we genuinely don't have
+The connector grows one small thing to make that possible — a token-authenticated,
+read-only door for automations, so a script can ask it for a report without being a
+person in a Claude session.
 
-**Nothing in our stack runs unattended.** The connector is request-driven: something has to
-ask it. Your monthly-refresh-without-a-human need is real and unmet, and it's the part
-worth building.
-
-## The shape we're proposing
-
-**One custodian, two ways in.**
-
-The connector keeps every Intuit credential — that's its job and it's now built for it. It
-grows a second door for automations: a token-authenticated read-only API that returns the
-same shaped reports its Claude tools return.
-
-**You build the pipeline as your own service.** You own the schedule, the landing-grid
-write, the model logic, the alerting. You call the connector for data and never hold an
-Intuit token. Your existing dashboard code transfers almost entirely — minus the OAuth,
-the refresh and the rotation handling, which is the part that was going to be dangerous.
-
-This also removes the client-switching problem for you completely. A service token
-addresses a company by its realm id, so switching clients is a parameter, not a
-reconnection.
+**The reason to keep tokens in one place, stated plainly.** Two services holding
+write-capable tokens for the same clients would mean two token stores, two revocation
+paths, and two things to patch when Intuit changes something. That doubles the custodial
+risk to solve a scheduling problem — and custody is the part you rightly call existential.
+One custodian, two doors.
 
 ## Four things from your proposal we're adopting
 
