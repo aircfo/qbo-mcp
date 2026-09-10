@@ -1,66 +1,56 @@
 import type { RequestHandler } from "express";
 import { env } from "../config/env.js";
-import { connectionStore, intuitOAuth, oauthStore } from "../deps.js";
+import {
+  clientManager,
+  connectionStore,
+  intuitOAuth,
+  oauthStore,
+} from "../deps.js";
 import { log } from "../log.js";
+import { asRecord, promisify, withTimeout } from "../tools/_format.js";
 import { reconcileConnection } from "./connection-reconcile.js";
+import { confirmPage, errorPage } from "./pages.js";
 
-function errorPage(message: string): string {
-  return `<!doctype html><html><body style="font-family:system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#fff0f0">
-    <h2 style="color:#d32f2f">Couldn't connect QuickBooks</h2>
-    <p>${message}</p>
-  </body></html>`;
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+/** Bound so a slow CompanyInfo call cannot stall the connect flow. */
+const COMPANY_NAME_TIMEOUT_MS = 8_000;
 
 /**
- * Shown after the QuickBooks connection is created, instead of a blind 302 back
- * to the MCP client's loopback. The redirect *destination* (the desktop app's
- * local listener) is outside our control and can be unreachable at this instant
- * — a blind 302 then dead-ends the browser on a raw "can't connect" error. So
- * we render a success page first (top-level meta-refresh auto-attempts the
- * handoff after a beat, which Safari handles more reliably than an auto-302),
- * keep a user-clickable link, and reassure the user the connection already
- * succeeded even if the redirect itself errors.
+ * Best-effort company name for the confirmation page, cached on the row while
+ * we have it.
+ *
+ * The page is the whole point of this step, and "you connected realm
+ * 719325880" is not something a person can check. A name is. So this call is
+ * worth making here even though the same column is also filled lazily on the
+ * first `get_company_info` — and it is best-effort, because a person can still
+ * confirm against the realm if Intuit is slow.
  */
-function successPage(redirectUrl: string): string {
-  const safeUrl = escapeAttr(redirectUrl);
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="refresh" content="2;url=${safeUrl}" />
-  <title>QuickBooks connected</title>
-</head>
-<body style="font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center">
-  <main style="background:#fff;max-width:420px;width:90%;padding:32px;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.1);text-align:center">
-    <div style="font-size:40px;line-height:1">✅</div>
-    <h1 style="font-size:20px;margin:12px 0 8px">QuickBooks connected</h1>
-    <p style="color:#555;font-size:14px;margin:0 0 24px">Returning you to Claude…</p>
-    <a href="${safeUrl}"
-      style="display:inline-block;width:100%;box-sizing:border-box;padding:12px;font-size:15px;font-weight:600;color:#fff;background:#2ca01c;border-radius:8px;text-decoration:none">
-      Return to Claude
-    </a>
-    <p style="color:#888;font-size:12px;margin:20px 0 0">
-      If this page shows a connection error, your QuickBooks connection still succeeded — go back to Claude and try your request again.
-    </p>
-  </main>
-</body>
-</html>`;
+async function captureCompanyName(
+  connectionId: string,
+): Promise<string | null> {
+  try {
+    const { qb, realmId } = await clientManager.getClient(connectionId);
+    const info = asRecord(
+      await withTimeout(
+        () => promisify((cb) => qb.getCompanyInfo(realmId, cb)),
+        COMPANY_NAME_TIMEOUT_MS,
+        "QuickBooks company lookup",
+      ),
+    );
+    const name =
+      typeof info?.CompanyName === "string" ? info.CompanyName : null;
+    if (name) connectionStore.setCompanyName(connectionId, name);
+    return name;
+  } catch (err) {
+    log.warn({ connectionId, err: String(err) }, "company_name_lookup_failed");
+    return null;
+  }
 }
 
 /**
- * Intuit's OAuth redirect lands here. We match it to the pending MCP
- * authorization (via the opaque `state`), exchange Intuit's code for tokens +
- * realmId, persist the connection, then hand an authorization code back to the
- * MCP client by redirecting to its registered redirect_uri.
+ * Intuit's OAuth redirect lands here, after Google has already established who
+ * the caller is. This exchanges Intuit's code, stores the connection, and then
+ * stops: the MCP client gets no authorization code until the person confirms,
+ * on the next page, that this is the company they meant.
  */
 export const intuitCallbackHandler: RequestHandler = async (req, res) => {
   const state = typeof req.query.state === "string" ? req.query.state : "";
@@ -76,6 +66,19 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
       );
     return;
   }
+
+  // Identity is set by the Google leg. Reaching here without it means the
+  // Intuit state was minted some other way, so refuse rather than fall back to
+  // an anonymous connection.
+  if (!pending.email || pending.emailVerified !== true) {
+    log.warn({ clientId: pending.clientId }, "intuit_callback_unverified");
+    res
+      .status(400)
+      .type("html")
+      .send(errorPage("Please start the connection again and sign in first."));
+    return;
+  }
+
   if (!code) {
     res
       .status(400)
@@ -111,7 +114,8 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
       },
       {
         realmId: tokens.realmId,
-        email: pending.email ?? null,
+        email: pending.email,
+        emailVerified: true,
         termsAcceptedAt: pending.termsAcceptedAt ?? null,
         accessToken: tokens.accessToken,
         accessExpiresAt: tokens.accessExpiresAt,
@@ -119,21 +123,34 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
       },
     );
     log.info(
-      { connectionId, realmId: tokens.realmId, email: pending.email, reused },
+      {
+        connectionId,
+        realmId: tokens.realmId,
+        email: pending.email,
+        reused,
+      },
       "connection_created",
     );
 
-    const authCode = oauthStore.issueAuthCode({
-      clientId: pending.clientId,
+    const companyName = await captureCompanyName(connectionId);
+    const confirmToken = oauthStore.createPendingConfirm({
       connectionId,
-      codeChallenge: pending.codeChallenge,
+      clientId: pending.clientId,
       redirectUri: pending.redirectUri,
+      codeChallenge: pending.codeChallenge,
+      mcpState: pending.mcpState,
+      created: !reused,
     });
 
-    const redirect = new URL(pending.redirectUri);
-    redirect.searchParams.set("code", authCode);
-    if (pending.mcpState) redirect.searchParams.set("state", pending.mcpState);
-    res.type("html").send(successPage(redirect.toString()));
+    res.type("html").send(
+      confirmPage({
+        token: confirmToken,
+        companyName,
+        realmId: tokens.realmId,
+        environment: env.INTUIT_ENVIRONMENT,
+        email: pending.email,
+      }),
+    );
   } catch (err) {
     log.error(
       { err: err instanceof Error ? err.stack : String(err) },

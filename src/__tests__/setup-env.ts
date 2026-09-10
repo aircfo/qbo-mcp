@@ -16,3 +16,8 @@ process.env.INTUIT_CLIENT_SECRET ??= "test-client-secret";
 process.env.INTUIT_REDIRECT_URI ??=
   "https://qbo-mcp.test/oauth/intuit/callback";
 process.env.INTUIT_ENVIRONMENT ??= "sandbox";
+process.env.GOOGLE_OAUTH_CLIENT_ID ??= "test-google-client-id";
+process.env.GOOGLE_OAUTH_CLIENT_SECRET ??= "test-google-client-secret";
+process.env.ALLOWED_DOMAIN ??= "aircfo.com";
+process.env.ALLOWED_USERS ??= "*";
+process.env.ADMIN_USERS ??= "admin@aircfo.com";

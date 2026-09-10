@@ -11,8 +11,12 @@ export interface Connection {
   id: string;
   realmId: string;
   companyName: string | null;
-  /** Self-reported email captured at connect time (unverified). */
+  /** The address that authorized this connection. */
   email: string | null;
+  /** True when `email` is a Google-verified identity, not a typed-in string. */
+  emailVerified: boolean;
+  /** Whether write tools are enabled for this connection. Off by default. */
+  writesEnabled: boolean;
   termsAcceptedAt: number | null;
   accessToken: string;
   /** Epoch ms at which the access token expires. */
@@ -27,10 +31,23 @@ export interface NewConnection {
   realmId: string;
   companyName?: string | null;
   email?: string | null;
+  emailVerified?: boolean;
   termsAcceptedAt?: number | null;
   accessToken: string;
   accessExpiresAt: number;
   refreshToken: string;
+}
+
+/** An administrative listing row: identity and state, never credentials. */
+export interface ConnectionSummaryRow {
+  id: string;
+  realm_id: string;
+  company_name: string | null;
+  email: string | null;
+  email_verified: number;
+  writes_enabled: number;
+  created_at: number;
+  refresh_updated_at: number;
 }
 
 /** The row shape as stored (token columns hold ciphertext). */
@@ -39,6 +56,8 @@ interface ConnectionRow {
   realm_id: string;
   company_name: string | null;
   email: string | null;
+  email_verified: number;
+  writes_enabled: number;
   terms_accepted_at: number | null;
   access_token_enc: string;
   access_expires_at: number;
@@ -65,15 +84,17 @@ export class ConnectionStore {
     this.db
       .prepare(
         `INSERT INTO connections
-          (id, realm_id, company_name, email, terms_accepted_at, access_token_enc,
-           access_expires_at, refresh_token_enc, refresh_updated_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, realm_id, company_name, email, email_verified, terms_accepted_at,
+           access_token_enc, access_expires_at, refresh_token_enc,
+           refresh_updated_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         input.realmId,
         input.companyName ?? null,
         input.email ?? null,
+        input.emailVerified ? 1 : 0,
         input.termsAcceptedAt ?? null,
         this.cipher.encrypt(input.accessToken),
         input.accessExpiresAt,
@@ -163,12 +184,51 @@ export class ConnectionStore {
     this.db.prepare(`DELETE FROM connections WHERE id = ?`).run(id);
   }
 
+  /**
+   * Promote a row whose `email` predates the identity gate, once the same
+   * address has proved itself through Google.
+   */
+  setEmailVerified(id: string, verified: boolean): void {
+    this.db
+      .prepare(
+        `UPDATE connections SET email_verified = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(verified ? 1 : 0, Date.now(), id);
+  }
+
+  /** Turn write tools on or off for one connection. Administrative. */
+  setWritesEnabled(id: string, enabled: boolean): void {
+    this.db
+      .prepare(
+        `UPDATE connections SET writes_enabled = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(enabled ? 1 : 0, Date.now(), id);
+  }
+
+  /**
+   * Every connection, without its credentials. Deliberately not built on
+   * `toConnection`: an administrative listing has no use for tokens, and
+   * decrypting dozens of them to throw them away is both wasteful and a way
+   * for plaintext credentials to end up somewhere they were not wanted.
+   */
+  listSummaries(): ConnectionSummaryRow[] {
+    return this.db
+      .prepare(
+        `SELECT id, realm_id, company_name, email, email_verified,
+                writes_enabled, created_at, refresh_updated_at
+         FROM connections ORDER BY created_at`,
+      )
+      .all() as ConnectionSummaryRow[];
+  }
+
   private toConnection(row: ConnectionRow): Connection {
     return {
       id: row.id,
       realmId: row.realm_id,
       companyName: row.company_name,
       email: row.email,
+      emailVerified: row.email_verified === 1,
+      writesEnabled: row.writes_enabled === 1,
       termsAcceptedAt: row.terms_accepted_at,
       accessToken: this.cipher.decrypt(row.access_token_enc),
       accessExpiresAt: row.access_expires_at,

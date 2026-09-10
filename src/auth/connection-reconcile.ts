@@ -16,6 +16,7 @@ export interface ReconcileDeps {
         refreshToken: string;
       },
     ): void;
+    setEmailVerified(id: string, verified: boolean): void;
   };
   /** Best-effort upstream revoke of a token we are about to stop storing. */
   revokeIntuitToken(token: string): Promise<void>;
@@ -24,8 +25,10 @@ export interface ReconcileDeps {
 
 export interface ReconcileInput {
   realmId: string;
-  /** Self-reported at connect time, so it identifies a person only loosely. */
+  /** The address that authorized this connection. */
   email: string | null;
+  /** True when `email` came from a verified Google sign-in. */
+  emailVerified: boolean;
   termsAcceptedAt: number | null;
   accessToken: string;
   accessExpiresAt: number;
@@ -72,6 +75,7 @@ export async function reconcileConnection(
       connectionId: deps.connections.create({
         realmId: input.realmId,
         email: input.email,
+        emailVerified: input.emailVerified,
         termsAcceptedAt: input.termsAcceptedAt,
         accessToken: input.accessToken,
         accessExpiresAt: input.accessExpiresAt,
@@ -98,6 +102,13 @@ export async function reconcileConnection(
     accessExpiresAt: input.accessExpiresAt,
     refreshToken: input.refreshToken,
   });
+
+  // Promote a row that predates the identity gate. Its address was typed on
+  // the old connect page; the same address has now proved itself through
+  // Google, which is exactly what the one-time re-authorization is for.
+  if (input.emailVerified && !existing.emailVerified) {
+    deps.connections.setEmailVerified(existing.id, true);
+  }
 
   return { connectionId: existing.id, reused: true };
 }

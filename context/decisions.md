@@ -273,3 +273,48 @@ company am I bound to" **without calling QuickBooks**. The identity check in
 the bookkeeping repo needed a fallback when the entity endpoints returned 504
 five times running, and improvised one by comparing account ids to a stored
 fingerprint. A tool that reads only our own database is the better fallback.
+
+## 2026-09-10 — Identity is Google, established before Intuit and re-checked every request
+
+**Decision:** the connect flow becomes Google → Intuit → confirm, and the public
+connect page is deleted.
+
+1. **Google first, Intuit second.** `provider.authorize` parks the MCP
+   authorization and redirects to Google; `/oauth/google/callback` verifies the
+   signed `id_token`, applies the domain and allowlist gate, and only then
+   forwards to Intuit. An address we do not admit never reaches QuickBooks at
+   all. The old flow asked for an email on a form and believed the answer.
+2. **Each leg gets its own single-use state.** The Google state is consumed at
+   its callback and a *new* state is minted for Intuit with the verified address
+   attached, so the Google leg cannot be replayed into a second Intuit consent.
+3. **The gate runs on every request, not just at sign-in.** `verifyAccessToken`
+   loads the connection and re-applies the allowlist, so removing someone ends
+   their access on their next call rather than whenever their token expires.
+   A connection made before the gate has no verified address and is refused
+   there — that is the one-time re-authorization, and it is deliberately not
+   skippable.
+4. **A confirmation step before the authorization code.** Intuit's company
+   picker decides which company a grant covers and this server has no say in it,
+   so connecting the wrong company was silent. The person now sees the company
+   name and realm and must confirm; declining revokes the grant. A connection
+   the flow *created* is deleted on cancel, one it merely refreshed is not —
+   that row belongs to connections the person already had.
+5. **`email_verified` rather than a second address column.** The plan called for
+   an `authorized_by` column beside `email`. One address column plus a verified
+   flag is less to keep consistent, and it leaves `reconcileConnection`'s
+   (realm, email) key untouched — so the one-time re-authorization *folds onto*
+   the row it upgrades instead of creating another.
+6. **Domain-wide by a visible sentinel.** `ALLOWED_USERS=*` admits any verified
+   address on `ALLOWED_DOMAIN`; an empty value admits nobody. See the access
+   decision logged the same day for why the failure mode points that way.
+
+**Administrative tools** (`list_connections`, `revoke_connection`,
+`set_writes_enabled`) are registered only for sessions whose verified address is
+in `ADMIN_USERS`, so they are absent from other tool lists rather than present
+and refusing. They close the "no admin-initiated revocation" limitation
+`SECURITY.md` carried, and they are what will clean up the orphan rows that
+predate the reconcile change.
+
+**Also:** expired `oauth_tokens` rows are swept hourly with a week of grace.
+Nothing pruned them before, so the table held 923 access tokens for 37
+connections.

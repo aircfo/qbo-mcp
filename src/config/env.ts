@@ -43,19 +43,43 @@ const envSchema = z.object({
   INTUIT_REDIRECT_URI: z.string().url(),
   INTUIT_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
 
-  // Optional links surfaced on the connect page. When set, the acknowledgment
-  // references them; when unset, the page shows a generic data-access notice.
-  TERMS_URL: z.string().url().optional(),
-  PRIVACY_URL: z.string().url().optional(),
+  // Google is the identity provider: it proves who the caller is at connect
+  // time, and nothing more. The gate reads the verified `id_token`; no Google
+  // data is ever requested. Configure the client's redirect URI as
+  // `<PUBLIC_URL>/oauth/google/callback`.
+  GOOGLE_OAUTH_CLIENT_ID: z.string().min(1),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1),
 
-  // Public user guide (GitHub Pages). Linked from the connect page and served
-  // as the redirect target for the bare server root. Normalized to a trailing
-  // slash because links are composed as `${DOCS_URL}page.html`.
-  DOCS_URL: z
+  // The Workspace domain an address must belong to.
+  ALLOWED_DOMAIN: z.string().min(1).default("aircfo.com"),
+
+  // Who may connect. Either the sentinel `*` — any verified address on
+  // ALLOWED_DOMAIN — or an explicit comma-separated list.
+  //
+  // Empty denies everyone, deliberately: `*` has to be a visible choice, so
+  // that a variable accidentally cleared during a deploy locks people out
+  // rather than silently opening the server to a whole domain.
+  ALLOWED_USERS: z
     .string()
-    .url()
-    .default("https://aircfo.github.io/qbo-mcp/")
-    .transform((u) => (u.endsWith("/") ? u : `${u}/`)),
+    .default("")
+    .transform((raw) =>
+      raw
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => entry.length > 0),
+    ),
+
+  // Who additionally gets the administrative tools (list/revoke connections,
+  // enable writes). A subset of the people ALLOWED_USERS admits.
+  ADMIN_USERS: z
+    .string()
+    .default("")
+    .transform((raw) =>
+      raw
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => entry.length > 0),
+    ),
 });
 
 export type Env = z.infer<typeof envSchema>;

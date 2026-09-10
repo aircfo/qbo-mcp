@@ -2,9 +2,13 @@ import express, { type ErrorRequestHandler } from "express";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { env } from "./config/env.js";
-import { oauthProvider } from "./deps.js";
+import { oauthProvider, oauthStore } from "./deps.js";
 import { SCOPE } from "./auth/provider.js";
-import { connectStartHandler } from "./auth/connect-start.js";
+import {
+  connectCancelHandler,
+  connectConfirmHandler,
+} from "./auth/connect-confirm.js";
+import { googleCallbackHandler } from "./auth/google-callback.js";
 import { intuitCallbackHandler } from "./auth/intuit-callback.js";
 import { log } from "./log.js";
 import { RateLimiter } from "./rate-limit.js";
@@ -72,23 +76,25 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// A bare visit to the server root (e.g. someone inspecting the connector URL)
-// lands on the user guide instead of a 404.
+// A bare visit to the server root — usually someone inspecting the connector
+// URL. There is nothing here for the public any more.
 app.get("/", (_req, res) => {
-  res.redirect(env.DOCS_URL);
+  res
+    .type("html")
+    .send(
+      "<p style=\"font-family:system-ui;padding:2rem\">airCFO QBO Gateway — an internal connector. Nothing to see here.</p>",
+    );
 });
 
-// Connect-page form submit (collects email, then forwards to Intuit). Needs
-// urlencoded body parsing for the HTML form post.
-app.post(
-  "/connect/start",
-  express.urlencoded({ extended: false, limit: "16kb" }),
-  connectStartHandler,
-);
-
-// Where Intuit redirects after the user grants consent. Not part of the MCP
-// OAuth surface — it's our upstream callback that creates the connection.
+// The connect flow, in order: Google establishes who the caller is, Intuit
+// grants access to a company, and the confirmation step is where the MCP
+// client finally receives its authorization code.
+app.get("/oauth/google/callback", googleCallbackHandler());
 app.get("/oauth/intuit/callback", intuitCallbackHandler);
+
+const connectForm = express.urlencoded({ extended: false, limit: "16kb" });
+app.post("/connect/confirm", connectForm, connectConfirmHandler);
+app.post("/connect/cancel", connectForm, connectCancelHandler);
 
 // MCP OAuth server endpoints: metadata discovery, dynamic client registration,
 // /authorize, /token, /revoke. Must be mounted at the app root.
@@ -138,6 +144,18 @@ const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
 app.use(errorHandler);
 
 startSessionReaper();
+
+// Nothing pruned the token table before, so it kept every access token ever
+// issued. Sweep hourly, keeping a week of expired rows so they are still there
+// when someone reads back a connect attempt from the logs.
+const TOKEN_RETENTION_MS = 7 * 24 * 60 * 60_000;
+setInterval(
+  () => {
+    const removed = oauthStore.purgeExpired(TOKEN_RETENTION_MS);
+    if (removed > 0) log.info({ removed }, "oauth_tokens_purged");
+  },
+  60 * 60_000,
+).unref();
 
 app.listen(env.PORT, () => {
   log.info(
