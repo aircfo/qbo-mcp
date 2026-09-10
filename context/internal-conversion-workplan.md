@@ -15,16 +15,117 @@ change who can do what to a client's books.
 commits, PR against `main`, CI green (PR 1 adds CI), merge. Merging to `main` **is** the production
 deploy (Railway auto-deploys). Verify each deploy with `railway logs` before calling the row done.
 
-## P0 · Before the code (Fri 09-11 → Mon 09-14)
+## P0 · Before the code — **proposed answers, 2026-09-10, awaiting Alex's approval**
 
 | # | Item | Owner | Done when |
 |---|---|---|---|
-| 0.1 | Rulings logged in `context/decisions.md` | Claude | done 2026-09-10 |
-| 0.2 | **Identify `aarondras@gmail.com`** (realm 719325880, five connections since June, active 09-10). Teammate on a personal account → allowlist or ask for an @aircfo.com login. Client contact → decide with the AM. Unknown by Wed 09-16 → one-line note that the hosted connector is now internal, sent before PR 3 deploys | Alex | name known, or the note sent |
-| 0.3 | **Google OAuth client for qbo-mcp**, in the same Google Cloud project as `aircfo-mcp`: type Web application; authorized redirect URIs `https://qbo-mcp-production-5667.up.railway.app/oauth/google/callback` and the sandbox project's equivalent; user type Internal (Workspace). Put `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` into **both** Railway projects' variables now so PR 3 is not blocked on it | Alex, ~10 min | both projects show the two variables |
-| 0.4 | Draft `ALLOWED_USERS` for Railway: everyone who appears in the production table plus the team who will run closes (alex, david, johannes, kevin, kettia, romicca, aivic, grace.cuya, carlos.damico; add Kim and Justin McLoughlin). `ADMIN_USERS`: alex | Alex | variable set on both projects (comma-separated, lowercase) |
-| 0.5 | Tell the team (Slack): PR 1 ends the "reconnect doesn't work" defect this week; PR 3 will force **one** re-authorization of every QuickBooks connector the day it ships, announced 24 h ahead | Alex | posted |
-| 0.6 | Kevin: note the date and time of any "server needs authentication" event from 09-14 on, so PR 1's effect is measurable from his side too | Kevin | log kept in the categorize packet's *Steps observed* |
+| 0.1 | Rulings logged in `context/decisions.md` | Claude | **done** 2026-09-10 |
+| 0.2 | Identify `aarondras@gmail.com` | Alex | **researched — see below.** Almost certainly **Aaron Drasner, Controller, Union Square Donuts**: HubSpot contact `aaron@unionsquaredonuts.com`, created 2026-06-18, source `asg-webinar`, lifecycle **lead**. Awaiting Alex's call between notify-and-offboard (recommended), an allowlist exception, or a silent cut |
+| 0.3 | Google OAuth client for qbo-mcp | Alex, ~10 min | **spec below, ready to execute.** Both redirect URIs now known; the sandbox host is `qbo-mcp-sandbox.up.railway.app` |
+| 0.4 | `ALLOWED_USERS` / `ADMIN_USERS` | Alex | **list below, from the production table + the Front roster.** One value is missing and it is load-bearing: Kim's sign-in address |
+| 0.5 | Tell the team | Alex | **draft below.** The re-auth notice is now the only part that still matters; the reconnect fix shipped 2026-09-10 |
+| 0.6 | Kevin logs re-auth events | Kevin | **draft below.** Partly superseded: the server now measures this itself, so Kevin's log is the human cross-check |
+
+### 0.2 — who `aarondras@gmail.com` is, and what to do about him
+
+**The evidence** (Gmail, Front contacts, HubSpot, the Front teammate roster, and the production
+database, 2026-09-10):
+
+| Fact | Source |
+|---|---|
+| Not an airCFO teammate — absent from the 65-person Front roster | Front |
+| No correspondence with Alex, ever | Gmail (`aarondras`, `drasner`, `unionsquaredonuts`) |
+| **`Aaron Drasner`, job title Controller, `aaron@unionsquaredonuts.com`**, created 2026-06-18, `hs_analytics_source_data_1` = **`asg-webinar`**, lifecycle **lead** | HubSpot |
+| Connects through **claude.ai's custom-connector flow**, not the plugin — he was given the URL and added it himself | `oauth_clients` join: all five of his connections use the `Claude` client |
+| Five connections to realm **719325880** from 2026-06-29 to 2026-09-06; 75 tool calls; token refreshed **2026-09-10 17:21 UTC** | production database + logs |
+| **The second-heaviest user of the whole server**, after Alex | 293 + 138 requests on his two most recent connections |
+
+`aarondras` is the first nine characters of `Aaron Dras`ner, and the timeline fits exactly: HubSpot
+lead on 06-18 from the ASG webinar campaign, webinar 06-23, first QuickBooks connection 06-29. Alex
+will recognise the name either way — this is an inference from converging evidence, not a
+confirmed identity.
+
+**Recommendation: notify, then offboard on the PR 3 date. Do not cut him silently.** He is a
+controller at a real business who has been running our connector against his own books for ten
+weeks and used it today; he is also an open sales lead. A silent cut-off on 09-21 reads as a broken
+tool, and it is the worst outcome available for a lead who has already shown he wants this.
+
+| Option | What it costs | Verdict |
+|---|---|---|
+| **Notify and offboard** — Alex sends one short note before 09-21: the hosted connector is becoming internal, here is the self-host path (the repo is MIT, the plugin's README already documents it), and if he wants the managed version, let's talk | One email. Keeps the ruling intact and turns the offboard into a sales conversation | **Recommended** |
+| Allowlist him | Ruling 2 makes identity `@aircfo.com`-only, so this needs a per-connection exception — exactly the open front door PR 3 exists to close, kept open for one person and no policy for the next | Not recommended |
+| Silent cut | Nothing to write. He discovers it as a failure, mid-month, on his own books | Not recommended |
+
+### 0.3 — the Google OAuth client, ready to create
+
+Same Google Cloud project as `aircfo-mcp`, so one consent screen serves both connectors.
+
+| Field | Value |
+|---|---|
+| Type | Web application |
+| Name | `qbo-mcp (airCFO QBO Gateway)` |
+| User type | Internal (Workspace) |
+| Authorized redirect URI 1 | `https://qbo-mcp-production-5667.up.railway.app/oauth/google/callback` |
+| Authorized redirect URI 2 | `https://qbo-mcp-sandbox.up.railway.app/oauth/google/callback` |
+
+Then `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` into **both** Railway projects
+("QBO MCP Server" and "QBO MCP (Sandbox)"). No scopes to configure beyond the defaults: the gate
+uses `openid email profile` and reads the verified `id_token`, never Google data.
+
+**Worth knowing:** the sandbox project auto-deploys `main` too — it is running the same
+`ebaa7ff8` as production right now. So PR 3's and PR 5's code reach the sandbox the moment they
+merge, which is what makes sandbox-first proving cheap. The switch that keeps them apart is
+`WRITES_ENABLED`, set per project.
+
+### 0.4 — the allowlist, from evidence
+
+Everyone below either connected or started a connection against this server, or is named in the
+September plan as running a close. Comma-separated, lowercase, on both Railway projects.
+
+```
+ALLOWED_USERS=alex@aircfo.com,david@aircfo.com,johannes@aircfo.com,kevin@aircfo.com,
+kettia@aircfo.com,romicca@aircfo.com,aivic@aircfo.com,grace.cuya@aircfo.com,
+carlos.damico@aircfo.com,justin@aircfo.com,kristin.miller@aircfo.com
+ADMIN_USERS=alex@aircfo.com,david@aircfo.com
+```
+
+Provenance: the first seven created connections; `grace.cuya` and `carlos.damico` submitted the
+connect page and never completed (the funnel leak); `justin@aircfo.com` is Justin McLoughlin, who
+signs the registers; `kristin.miller@aircfo.com` runs client closes in October per the vision page.
+Two admins rather than one so revoking a connection never waits on one person.
+
+**The gap, and it matters more than the rest: Kim has no address here.** Front has no individual
+teammate named Kim — `kim@aircfo.com` is a shared "Ops Team" seat — and the repo only ever calls her
+"Kim, Sr Accountant". Under rulings 2 and 3 the approver on every write is a **verified
+`@aircfo.com` Google account**, so if Kim works from a shared mailbox or a non-`aircfo.com` address
+she cannot approve a batch as herself, and the write path's whole accountability story fails at the
+one person who posts. Three ways out, Alex's call: give Kim her own `@aircfo.com` Google account
+before 09-21; or route September's approvals through Kevin or Justin and let Kim work the worksheet
+as she does today; or accept dry-run-only for September, which is already the plan's fallback.
+
+### 0.5 — the team notice, drafted
+
+Post once now, and again the day before PR 3 deploys.
+
+> **QuickBooks connector, two changes.**
+> **Fixed today.** The connector losing its session after an hour — the one where `/mcp` reconnect
+> didn't help and you had to disconnect and re-authenticate — is fixed and deployed. It was our bug:
+> the server answered a dead session in a way Claude couldn't recover from. If you still hit it after
+> today, tell me the time and I'll read it out of the logs.
+> **Coming Mon 09-21.** Sign-in moves to your Google `@aircfo.com` account, and the connector
+> becomes airCFO-only. On that day you'll re-authorize each client folder once — `/mcp` from the
+> folder, sign in with Google, pick the client's company in Intuit as usual. Once. After that the
+> connect page will show you which company and which realm you just connected, so a wrong-company
+> grant is visible instead of silent.
+
+### 0.6 — Kevin's cross-check, drafted
+
+> Kevin — the session defect (#52) is fixed and deployed as of this afternoon. Two asks while you run
+> the August rehearsal: (1) if a connector ever tells you it needs authentication again, note the
+> date and time in the packet's *Steps observed* — I can match it to the server logs and see whether
+> it's the same cause or a new one; (2) at least once, leave a session idle for more than half an
+> hour and then make a tool call, and tell me whether it just worked. The server measures this now,
+> but your side is the one that counts.
 
 ## PR 1 · `fix/session-404-timeouts-ci` — unattended reads (P1) · **open as [#13](https://github.com/aircfo/qbo-mcp/pull/13), CI green, awaiting review** (2026-09-10, ahead of the window)
 
