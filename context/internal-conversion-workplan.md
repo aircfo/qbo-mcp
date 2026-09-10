@@ -15,16 +15,17 @@ change who can do what to a client's books.
 commits, PR against `main`, CI green (PR 1 adds CI), merge. Merging to `main` **is** the production
 deploy (Railway auto-deploys). Verify each deploy with `railway logs` before calling the row done.
 
-## P0 · Before the code — **proposed answers, 2026-09-10, awaiting Alex's approval**
+## P0 · Before the code — **decided by Alex, 2026-09-10**
 
-| # | Item | Owner | Done when |
+| # | Item | Owner | State |
 |---|---|---|---|
 | 0.1 | Rulings logged in `context/decisions.md` | Claude | **done** 2026-09-10 |
-| 0.2 | Identify `aarondras@gmail.com` | Alex | **researched — see below.** Almost certainly **Aaron Drasner, Controller, Union Square Donuts**: HubSpot contact `aaron@unionsquaredonuts.com`, created 2026-06-18, source `asg-webinar`, lifecycle **lead**. Awaiting Alex's call between notify-and-offboard (recommended), an allowlist exception, or a silent cut |
-| 0.3 | Google OAuth client for qbo-mcp | Alex, ~10 min | **spec below, ready to execute.** Both redirect URIs now known; the sandbox host is `qbo-mcp-sandbox.up.railway.app` |
-| 0.4 | `ALLOWED_USERS` / `ADMIN_USERS` | Alex | **list below, from the production table + the Front roster.** One value is missing and it is load-bearing: Kim's sign-in address |
-| 0.5 | Tell the team | Alex | **draft below.** The re-auth notice is now the only part that still matters; the reconnect fix shipped 2026-09-10 |
-| 0.6 | Kevin logs re-auth events | Kevin | **draft below.** Partly superseded: the server now measures this itself, so Kevin's log is the human cross-check |
+| 0.2 | Identify `aarondras@gmail.com` | Alex | **identified and ruled: notify, then offboard.** Almost certainly **Aaron Drasner, Controller, Union Square Donuts** — HubSpot contact `aaron@unionsquaredonuts.com`, created 2026-06-18, source `asg-webinar`, lifecycle **lead**. Note drafted below; Alex sends it before 09-21 |
+| 0.3 | Google OAuth client for qbo-mcp | Alex, ~10 min | **spec below, ready to execute — the only P0 item still open, and PR 3 waits on it** |
+| 0.4 | `ALLOWED_USERS` / `ADMIN_USERS` | Alex | **ruled: every airCFO team member**, not the eleven proposed. Expressed as `ALLOWED_USERS=*` — see below for why a sentinel and not a 65-name list |
+| 0.4b | Kim's approver identity | Alex | **ruled: Kim gets her own `@aircfo.com` Google account** before 09-21, so the person who reviews a batch is the person who approves it. PR 5's design assumes this |
+| 0.5 | Tell the team | Alex | **ruled: Alex posts both messages.** Drafts below, ready to copy |
+| 0.6 | Kevin logs re-auth events | Alex → Kevin | **ruled: Alex sends it.** Draft below |
 
 ### 0.2 — who `aarondras@gmail.com` is, and what to do about him
 
@@ -45,16 +46,42 @@ lead on 06-18 from the ASG webinar campaign, webinar 06-23, first QuickBooks con
 will recognise the name either way — this is an inference from converging evidence, not a
 confirmed identity.
 
-**Recommendation: notify, then offboard on the PR 3 date. Do not cut him silently.** He is a
-controller at a real business who has been running our connector against his own books for ten
-weeks and used it today; he is also an open sales lead. A silent cut-off on 09-21 reads as a broken
-tool, and it is the worst outcome available for a lead who has already shown he wants this.
+**Ruled 2026-09-10: notify, then offboard on the PR 3 date.** He is a controller at a real business
+who has been running our connector against his own books for ten weeks and used it today; he is also
+an open sales lead. A silent cut-off reads as a broken tool, and it is the worst outcome available
+for a lead who has already shown he wants this. An allowlist exception was rejected: it would need a
+per-connection bypass of the `@aircfo.com` rule, which is the open front door PR 3 exists to close.
 
-| Option | What it costs | Verdict |
-|---|---|---|
-| **Notify and offboard** — Alex sends one short note before 09-21: the hosted connector is becoming internal, here is the self-host path (the repo is MIT, the plugin's README already documents it), and if he wants the managed version, let's talk | One email. Keeps the ruling intact and turns the offboard into a sales conversation | **Recommended** |
-| Allowlist him | Ruling 2 makes identity `@aircfo.com`-only, so this needs a per-connection exception — exactly the open front door PR 3 exists to close, kept open for one person and no policy for the next | Not recommended |
-| Silent cut | Nothing to write. He discovers it as a failure, mid-month, on his own books | Not recommended |
+**The note, drafted for Alex to send before 09-21.** Written in the register of his own webinar
+follow-ups. Two things it deliberately does *not* do: claim we watched his usage, and point him at
+this repo — which goes private in PR 4, so "self-host ours" stops being an actionable answer. Intuit's
+own open-source server is the honest self-host path for one person on one company.
+
+> **Subject:** the QuickBooks connector — a heads up
+>
+> Hi Aaron,
+>
+> Quick heads up on the QuickBooks connector you picked up after the All Systems Go webinar. We're
+> folding it into our own internal tooling, so the hosted version goes airCFO-only on **Monday
+> September 22** and will stop connecting after that.
+>
+> Two options if you want to keep the capability:
+>
+> Intuit publishes their own open-source MCP server for QuickBooks — it's built for exactly your
+> case, one person and one company, running locally:
+> https://github.com/intuit/quickbooks-online-mcp-server
+>
+> Or, if you'd rather not run anything yourself: what you've been doing with it is close to what we
+> do for clients every month, and I'd be glad to walk you through how that works. Happy to find
+> 20 minutes: https://cal.frontapp.com/aircfo/alex/30min
+>
+> Either way, thanks for giving it a real run — genuinely useful to see someone use it in anger.
+>
+> Alex
+
+Two notes on the draft. **The date says Monday September 22**, one day after the deploy, so he is
+never cut off before the note's own deadline. **It offers a call, not an apology** — he is a lead,
+the tool worked, and the reason it is going away is that it became load-bearing internally.
 
 ### 0.3 — the Google OAuth client, ready to create
 
@@ -77,31 +104,46 @@ uses `openid email profile` and reads the verified `id_token`, never Google data
 merge, which is what makes sandbox-first proving cheap. The switch that keeps them apart is
 `WRITES_ENABLED`, set per project.
 
-### 0.4 — the allowlist, from evidence
+### 0.4 — the allowlist: every airCFO team member
 
-Everyone below either connected or started a connection against this server, or is named in the
-September plan as running a close. Comma-separated, lowercase, on both Railway projects.
+**Ruled 2026-09-10:** access is every airCFO team member, not the eleven the evidence named. That
+is a broader policy than the proposal and it simplifies the mechanism, because a 65-name list is
+worse than no list: it locks out every new hire until someone remembers to edit an environment
+variable, and it revokes a departure no faster than switching off their Google account already does.
 
 ```
-ALLOWED_USERS=alex@aircfo.com,david@aircfo.com,johannes@aircfo.com,kevin@aircfo.com,
-kettia@aircfo.com,romicca@aircfo.com,aivic@aircfo.com,grace.cuya@aircfo.com,
-carlos.damico@aircfo.com,justin@aircfo.com,kristin.miller@aircfo.com
+ALLOWED_USERS=*
+ALLOWED_DOMAIN=aircfo.com
 ADMIN_USERS=alex@aircfo.com,david@aircfo.com
 ```
 
-Provenance: the first seven created connections; `grace.cuya` and `carlos.damico` submitted the
-connect page and never completed (the funnel leak); `justin@aircfo.com` is Justin McLoughlin, who
-signs the registers; `kristin.miller@aircfo.com` runs client closes in October per the vision page.
-Two admins rather than one so revoking a connection never waits on one person.
+`*` means *any* address on `ALLOWED_DOMAIN` whose Google `id_token` says the address is verified.
+**It is a sentinel rather than an empty value on purpose:** an empty variable must deny everyone, so
+that a variable accidentally cleared fails closed instead of silently opening the server to a whole
+domain. Tightening later to a named list needs no code change — set the names and the sentinel is
+gone.
 
-**The gap, and it matters more than the rest: Kim has no address here.** Front has no individual
-teammate named Kim — `kim@aircfo.com` is a shared "Ops Team" seat — and the repo only ever calls her
-"Kim, Sr Accountant". Under rulings 2 and 3 the approver on every write is a **verified
-`@aircfo.com` Google account**, so if Kim works from a shared mailbox or a non-`aircfo.com` address
-she cannot approve a batch as herself, and the write path's whole accountability story fails at the
-one person who posts. Three ways out, Alex's call: give Kim her own `@aircfo.com` Google account
-before 09-21; or route September's approvals through Kevin or Justin and let Kim work the worksheet
-as she does today; or accept dry-run-only for September, which is already the plan's fallback.
+What still gates access with `*` set: a Google account on airCFO's Workspace, **and** completing
+Intuit consent for the specific company. Nobody reaches a client's ledger by signing in; they reach
+it by holding a grant for it. Two admins rather than one so revoking a connection never waits on a
+single person.
+
+`aircfo-mcp` keeps an explicit name list, and the difference is deliberate: it holds a domain-wide
+Google key that can read any teammate's mailbox, where this server reads a ledger the caller has
+already been granted. Same gate, different blast radius.
+
+### 0.4b — Kim gets her own account
+
+**Ruled 2026-09-10: Kim gets her own `@aircfo.com` Google account before 09-21.** Front had no
+individual teammate named Kim — `kim@aircfo.com` is the shared "Ops Team" seat — and under rulings 2
+and 3 the approver on every write is a verified `@aircfo.com` Google account. Routing approvals
+through Kevin or Justin was rejected: it splits the reviewer from the approver at exactly the step
+the approval exists for. Dry-run-only for September stays the fallback if the account does not
+arrive.
+
+**PR 5 assumes this.** The write path records one approver per batch and refuses a commit from an
+unverified identity, so if 09-21 arrives without Kim's account the September close runs dry-run and
+she posts from the worksheet as she does today.
 
 ### 0.5 — the team notice, drafted
 
@@ -113,10 +155,10 @@ Post once now, and again the day before PR 3 deploys.
 > the server answered a dead session in a way Claude couldn't recover from. If you still hit it after
 > today, tell me the time and I'll read it out of the logs.
 > **Coming Mon 09-21.** Sign-in moves to your Google `@aircfo.com` account, and the connector
-> becomes airCFO-only. On that day you'll re-authorize each client folder once — `/mcp` from the
-> folder, sign in with Google, pick the client's company in Intuit as usual. Once. After that the
-> connect page will show you which company and which realm you just connected, so a wrong-company
-> grant is visible instead of silent.
+> becomes airCFO-only — any airCFO address works, no list to be added to. On that day you'll
+> re-authorize each client folder once — `/mcp` from the folder, sign in with Google, pick the
+> client's company in Intuit as usual. Once. After that the connect page will show you which company
+> and which realm you just connected, so a wrong-company grant is visible instead of silent.
 
 ### 0.6 — Kevin's cross-check, drafted
 
@@ -206,9 +248,9 @@ re-check.
 | File | Change |
 |---|---|
 | `package.json` | add `google-auth-library` |
-| `src/config/env.ts` | add `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` (required), `ALLOWED_USERS` (comma list → lowercase array), `ALLOWED_DOMAIN` (default `aircfo.com`), `ADMIN_USERS`. Remove `TERMS_URL`, `PRIVACY_URL`, `DOCS_URL`, and the dead `JWT_SIGNING_KEY` from `.env` |
+| `src/config/env.ts` | add `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` (required), `ALLOWED_USERS` (comma list → lowercase array, or the single sentinel `*` meaning any verified address on the domain — **empty denies everyone**, so a cleared variable fails closed), `ALLOWED_DOMAIN` (default `aircfo.com`), `ADMIN_USERS`. Remove `TERMS_URL`, `PRIVACY_URL`, `DOCS_URL`, and the dead `JWT_SIGNING_KEY` from `.env` |
 | `src/auth/google-idp.ts` (new) | as in `aircfo-mcp`; redirect URI `${PUBLIC_URL}/oauth/google/callback` |
-| `src/auth/access.ts` (new) | `isAllowedUser(email)` = verified, ends with `@ALLOWED_DOMAIN`, in `ALLOWED_USERS`; `isAdmin(email)` |
+| `src/auth/access.ts` (new) | `isAllowedUser(email, verified)` = Google says verified, the address ends with `@ALLOWED_DOMAIN`, **and** either `ALLOWED_USERS` is the sentinel `*` or the address is in it; `isAdmin(email)`. Tested for the fail-closed empty case as well as the two allow paths |
 | `src/auth/provider.ts` | `authorize()` stores the pending auth (client, redirect, PKCE, MCP state) and redirects to Google with the state. `verifyAccessToken()` loads the connection, requires `authorized_by` non-null **and** `isAllowedUser(authorized_by)` — so legacy rows re-authenticate once and a de-listed person is cut off on their next call; `extra` carries `{ connectionId, email }` |
 | `src/auth/google-callback.ts` (new) | `GET /oauth/google/callback`: verify the code → gate → on refusal a plain page "not on the allowlist — ask Alex" and a `login_denied` log line; on success attach the verified email to the pending auth and redirect to Intuit |
 | `src/auth/intuit-callback.ts` | after `reconcileConnection` (PR 2) with `authorized_by` = the verified email, render the **confirmation page** (G5): company name, realm, environment, "connecting as you@aircfo.com", **Continue** / **Wrong company**. Store a `pending_confirm` row (10 min) carrying connection id, client, redirect, PKCE |
@@ -242,7 +284,7 @@ Gmail user is either allowlisted or refused, per 0.2.
 | `SECURITY.md` | rewrite: team identity, write controls, the audit table, what the tool can do to a client's books and who can do it, incident response (rotate `TOKEN_ENCRYPTION_KEY`, revoke, notify). Drop the "going public" checklist and the `docs/security-details.md` sync note |
 | `DEPLOY.md` | the Google client setup, the new variables, and a **Sandbox** section: the "QBO MCP (Sandbox)" Railway project is this same code with `INTUIT_ENVIRONMENT=sandbox`, used to develop and prove writes |
 | `context/intuit-launch-requirements.md` | one line at the top: superseded by the internal decision; kept for the pricing facts |
-| `aircfo/claude-startup-finance` (sibling PR) | remove the hosted URL from `plugins/finance-contextos/.mcp.json`; README rows 64 and 157 become "self-host qbo-mcp and point the plugin at your deployment"; `CHANGELOG`; version 0.9.1. The context-builder skill already degrades without the connector |
+| `aircfo/claude-startup-finance` (sibling PR) | remove the hosted URL from `plugins/finance-contextos/.mcp.json`; `CHANGELOG`; version 0.9.1. The context-builder skill already degrades without the connector. **The README cannot say "self-host `qbo-mcp`" any more:** rows 64, 157 and the `finance-contextos` README both link `github.com/aircfo/qbo-mcp`, which goes private in this same PR, so a public plugin would point the world at a 404. Point at [`intuit/quickbooks-online-mcp-server`](https://github.com/intuit/quickbooks-online-mcp-server) instead — MIT, single-user, single-company, which is what a plugin user actually wants — or drop the QuickBooks connector from the plugin entirely. **Alex's call; not decided yet.** The same substitution is already in Aaron's note |
 | `bookkeeping-automation` (sibling PR) | `connectors/registry.json` qbo: `identityCheck` compares `realmId` from `get_company_info` to the client README; `authRunbook` gains the Google sign-in step and drops the #52 defect note once PR 1 is verified; `playbooks/00-operator-setup.md` and `01-scaffold-and-connect.md` the same; key question #52 → `answered` with the date and the cause |
 
 **Done when:** `gh repo view` says private; the Pages URL returns 404; the plugin's connector file no
@@ -316,3 +358,6 @@ P0 ──► PR 1 ──► PR 2 ──► PR 3 ──► PR 5 ──► go/no-g
   plan's stated fallback. Order of what gives, unchanged: writes first, read gaps second, PR 1 never.
 - **Re-auth day goes badly:** the confirmation page and `login_denied` lines say why; the allowlist is
   an env var, fixed in Railway without a deploy.
+- **Kim's Google account does not arrive by 09-21:** September runs dry-run and she posts from the
+  worksheet, as the September plan already provides for. Nothing else in PR 5 changes — the approver
+  check is the same code either way.
