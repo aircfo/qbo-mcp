@@ -19,7 +19,7 @@ Built because the official options don't fit a finance team's needs:
 | Concern | This server |
 |---|---|
 | Transport | Streamable HTTP + sessions (remote, multi-client) |
-| Identity | Per-user OAuth; each user connects their own QBO company |
+| Identity | Google sign-in on an `@aircfo.com` account, re-checked every request; each person then connects a QBO company through Intuit |
 | Token storage | **Encrypted** (AES-256-GCM) in SQLite on a Railway volume |
 | Tool output | Structured JSON (slimmed), not HTML widgets |
 | Tool surface | Curated, typed, well-described subset (not all 143) |
@@ -65,7 +65,7 @@ a volume attaches to one instance, so this assumes a single running instance
 - [x] Batch C — customer-side reports: A/R + A/P aging detail, sales by customer/product/class, customer balances, transaction lists, class lookup
 - [ ] (deferred) Writes — out of scope for read-only v1
 
-## Tools (v1) — 42 total
+## Tools — 42, plus 3 administrative
 
 All data tools are read-only; the only state-changing tool is `disconnect_quickbooks`.
 
@@ -98,6 +98,11 @@ entries, invoices, bills, vendors, customers, items, payments, classes — e.g.
 `search_invoices` / `get_invoice`. `search_*` tools take typed `filters`
 (field/operator/value), `limit`, `offset`, and sort; `get_*` take an `id`.
 
+**Administrative** (registered only for sessions whose verified address is in
+`ADMIN_USERS`, so they are absent from everyone else's tool list):
+`list_connections`, `revoke_connection`, `set_writes_enabled`. They read and
+write this server's own rows and never touch a ledger.
+
 **Connection:** `disconnect_quickbooks` — revokes the connection with Intuit,
 deletes the stored tokens, and ends access (re-authorize to reconnect).
 
@@ -112,8 +117,16 @@ deletes the stored tokens, and ends access (re-authorize to reconnect).
 | `INTUIT_CLIENT_ID` / `INTUIT_CLIENT_SECRET` | Intuit app credentials |
 | `INTUIT_REDIRECT_URI` | Must match the Intuit app's registered redirect |
 | `INTUIT_ENVIRONMENT` | `sandbox` or `production` |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client; its redirect URI must be `<PUBLIC_URL>/oauth/google/callback` |
+| `ALLOWED_DOMAIN` | Workspace domain a signed-in address must belong to (default `aircfo.com`) |
+| `ALLOWED_USERS` | `*` for any verified address on that domain, or a comma-separated list. **Empty admits nobody** |
+| `ADMIN_USERS` | Comma-separated addresses that additionally get the administrative tools |
 
-Copy these into a local `.env` (see the table above) before running.
+Copy these into a local `.env` (see the table above) before running. For local
+work, point `PUBLIC_URL` at `http://localhost:8080`, set
+`INTUIT_ENVIRONMENT=sandbox`, and add
+`http://localhost:8080/oauth/google/callback` to the Google client's redirect
+URIs.
 
 ## Commands
 

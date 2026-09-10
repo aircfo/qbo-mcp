@@ -68,6 +68,25 @@ export function openDatabase(path: string): Database.Database {
   ensureColumn(db, "connections", "email", "TEXT");
   ensureColumn(db, "connections", "terms_accepted_at", "INTEGER");
 
+  // Whether `email` is a Google-verified identity rather than the address
+  // someone typed on the old connect page. Existing rows default to 0, so
+  // every connection made before the identity gate has to be re-authorized
+  // once — which is the intended one-time cutover, not a migration to write.
+  ensureColumn(
+    db,
+    "connections",
+    "email_verified",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+
+  // Per-connection write permission, off until an admin turns it on.
+  ensureColumn(
+    db,
+    "connections",
+    "writes_enabled",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+
   return db;
 }
 

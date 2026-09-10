@@ -11,6 +11,7 @@ const EMAIL = "kim@aircfo.com";
 const FRESH = {
   realmId: REALM,
   email: EMAIL,
+  emailVerified: true,
   termsAcceptedAt: 1_700_000_000_000,
   accessToken: "new-access",
   accessExpiresAt: 1_800_000_000_000,
@@ -23,6 +24,8 @@ function existingConnection(overrides: Partial<Connection> = {}): Connection {
     realmId: REALM,
     companyName: "airCFO",
     email: EMAIL,
+    emailVerified: true,
+    writesEnabled: false,
     termsAcceptedAt: 1_600_000_000_000,
     accessToken: "old-access",
     accessExpiresAt: 1_600_000_000_000,
@@ -37,19 +40,23 @@ function existingConnection(overrides: Partial<Connection> = {}): Connection {
 function deps(existing: Connection | null): ReconcileDeps & {
   create: ReturnType<typeof vi.fn>;
   updateTokens: ReturnType<typeof vi.fn>;
+  setEmailVerified: ReturnType<typeof vi.fn>;
 } {
   const create = vi.fn(() => "created-id");
   const updateTokens = vi.fn();
+  const setEmailVerified = vi.fn();
   return {
     connections: {
       findByRealmAndEmail: vi.fn(() => existing),
       create,
       updateTokens,
+      setEmailVerified,
     },
     revokeIntuitToken: vi.fn(async () => {}),
     onRevokeFailed: vi.fn(),
     create,
     updateTokens,
+    setEmailVerified,
   };
 }
 
@@ -60,7 +67,11 @@ describe("reconcileConnection", () => {
 
     expect(result).toEqual({ connectionId: "created-id", reused: false });
     expect(d.create).toHaveBeenCalledWith(
-      expect.objectContaining({ realmId: REALM, email: EMAIL }),
+      expect.objectContaining({
+        realmId: REALM,
+        email: EMAIL,
+        emailVerified: true,
+      }),
     );
     expect(d.updateTokens).not.toHaveBeenCalled();
     expect(d.revokeIntuitToken).not.toHaveBeenCalled();
@@ -109,6 +120,21 @@ describe("reconcileConnection", () => {
     expect(d.onRevokeFailed).toHaveBeenCalledWith(boom, "existing-id");
     expect(d.updateTokens).toHaveBeenCalledOnce();
     expect(result.reused).toBe(true);
+  });
+
+  it("promotes a row whose address predates the identity gate", async () => {
+    // Every connection made before the gate has an unverified, typed-in
+    // address. When the same person proves that address through Google, the
+    // row they already had is the one that should carry the verified identity.
+    const d = deps(existingConnection({ emailVerified: false }));
+    await reconcileConnection(d, FRESH);
+    expect(d.setEmailVerified).toHaveBeenCalledWith("existing-id", true);
+  });
+
+  it("leaves an already-verified row alone", async () => {
+    const d = deps(existingConnection({ emailVerified: true }));
+    await reconcileConnection(d, FRESH);
+    expect(d.setEmailVerified).not.toHaveBeenCalled();
   });
 
   it("creates without a lookup when no email was collected", async () => {

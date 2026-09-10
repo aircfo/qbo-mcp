@@ -17,10 +17,12 @@ for taking it public (Intuit production assessment + privacy/terms).
 
 ## What this server is
 
-A multi-user, remote MCP server. Each user connects **their own** QuickBooks
-Online company via Intuit OAuth; the server then exposes that company's data to
-the user's AI client (e.g. Claude) through read-only tools. It is intended to be
-**publicly reachable** — anyone with the URL can connect their own company.
+A multi-user, remote MCP server for **airCFO staff**. Each person signs in with
+their `@aircfo.com` Google account and connects a QuickBooks Online company via
+Intuit OAuth; the server then exposes that company's data to their AI client
+(e.g. Claude) through read-only tools. It is publicly *reachable* but not
+publicly *usable*: the URL is not a credential, and an address outside the
+allowlist is refused before the flow ever reaches QuickBooks.
 
 ## Data we handle
 
@@ -28,7 +30,7 @@ the user's AI client (e.g. Claude) through read-only tools. It is intended to be
 |---|---|---|
 | Intuit access + refresh tokens | Yes (SQLite on a Railway volume) | **Encrypted at rest** (AES-256-GCM); key in env, never on the volume |
 | QuickBooks realm id, company name | Yes | Plaintext (not secret) |
-| User email (self-reported at connect) | Yes | Plaintext; **unverified** |
+| Caller's email address | Yes | Plaintext (not secret); **verified by Google** at connect time and re-checked on every request |
 | Downstream OAuth tokens (access/refresh/codes) | Yes | **Hashed at rest** (SHA-256); only ever compared |
 | QuickBooks financial data (P&L, ledger, etc.) | **No** | Fetched live per request, never persisted |
 
@@ -79,11 +81,22 @@ fetch it on demand. That keeps the breach blast radius to "tokens" rather than
   registration, and short-lived access tokens + rotating refresh tokens.
 - **Intuit OAuth 2.0** for the upstream connection; refresh tokens rotate and
   are re-persisted on every refresh.
-- **Connect-time email capture** (self-reported, unverified) as a soft
-  accountability signal, with an acknowledgment of data access.
-- **Open registration** is intentional for a public tool: anyone can register a
-  client and connect their own company. This is *not* a cross-tenant risk (see
-  threat model) but is an accepted-risk decision (see Limitations).
+- **Google sign-in establishes identity** before Intuit is ever contacted. The
+  address comes from a signed `id_token` verified against Google, must belong to
+  `ALLOWED_DOMAIN`, and must be admitted by `ALLOWED_USERS` — either by name or
+  by the explicit `*` sentinel. An empty `ALLOWED_USERS` admits nobody, so a
+  variable accidentally cleared fails closed rather than exposing a domain.
+- **The allowlist is re-checked on every request**, not only at sign-in, so
+  removing someone ends their access immediately instead of whenever their
+  token happens to expire.
+- **Company confirmation.** Intuit's own company picker decides which company a
+  grant covers and this server has no say in it, so after consent the person is
+  shown the company name and realm and must confirm before the MCP client
+  receives an authorization code. Declining revokes the grant. Without this,
+  connecting the wrong company is silent.
+- **Client registration stays open** (any MCP client may register), which is not
+  a way in: registration issues no access, and every connection is gated by the
+  Google sign-in above.
 
 ## Abuse controls
 
@@ -101,13 +114,22 @@ fetch it on demand. That keeps the breach blast radius to "tokens" rather than
 
 ## Threat model
 
-**A malicious user who connects their own QBO company:**
-- ✅ Cannot reach any other user's data (isolation above).
-- ✅ Cannot read the encryption key or Intuit client secret (server-side env).
+**Someone outside airCFO who has the URL:**
+- ✅ Cannot connect at all. Google sign-in runs before Intuit is contacted, and
+  an address outside the allowlist is refused there.
+- ⚠️ Can still register an MCP client and reach `/authorize` → mitigated by the
+  per-IP rate limit and size caps; registration by itself grants nothing.
+
+**A teammate with a valid connection:**
+- ✅ Cannot reach a company they hold no Intuit grant for: a request's
+  QuickBooks client is resolved from the connection bound to their own token.
+- ✅ Cannot read the encryption key or the Intuit client secret (server-side env).
 - ✅ Cannot write to any books (read-only).
-- ⚠️ Could attempt to abuse the shared instance (DoS, registration spam) →
-  mitigated by the rate limits + size caps above; not fully eliminated on a
-  single instance.
+- ⚠️ Can connect *any* company they can pass Intuit consent for, and with
+  `ALLOWED_USERS=*` any teammate may do so. The confirmation step makes the
+  company visible at connect time and `list_connections` makes it auditable
+  afterwards, but the server does not restrict which staff may connect which
+  client.
 
 **An attacker against the server:**
 - Stealing tokens requires compromising the Railway environment (both the
@@ -121,13 +143,14 @@ raises the bar on key management, monitoring, and incident response.
 
 ## Known limitations / accepted risks
 
-- **Email is unverified** — a deterrent, not identity. (Add verification if
-  abuse warrants.)
-- **Open registration** — no gate on who may connect. Acceptable for a public
-  tool; revisit with an identity layer if abuse warrants.
-- **No admin-initiated revocation** — users can self-disconnect
-  (`disconnect_quickbooks`), but cross-user/admin revocation needs an identity
-  layer (deferred).
+- **Domain-wide access by default.** `ALLOWED_USERS=*` admits any verified
+  `@aircfo.com` address. Signing in still grants nothing on its own — reaching a
+  company's ledger also requires completing Intuit consent for it — but the
+  server does not restrict *which* staff may connect *which* client. Narrowing
+  to a named list needs no code change.
+- **Google is a single point of identity.** A compromised Workspace account is a
+  compromised connector session, bounded by the Intuit grants that account
+  holds.
 - **Single instance** — the volume-backed SQLite design runs on one instance.
   Scale-out requires migrating to Postgres + shared-state rate limiting.
 - **Rotating `TOKEN_ENCRYPTION_KEY` orphans all stored tokens** (users must
@@ -148,21 +171,21 @@ raises the bar on key management, monitoring, and incident response.
   `TOKEN_ENCRYPTION_KEY` (invalidates all tokens), force reconnect, and notify
   affected users. Maintain a security contact (below).
 
-## Going public: checklist
+## Obligations that outlast going internal
 
-1. **Intuit production security assessment.** Production apps that connect
-   third-party data are subject to Intuit's developer terms and typically must
-   pass a security questionnaire (and, above a connection threshold, a paid
-   third-party review). **Confirm current Intuit requirements before launch** —
-   an unreviewed public app risks suspension. This document is written to double
-   as source material for that questionnaire.
-2. **Privacy policy** covering: data collected (email, Intuit tokens, company
-   metadata), purpose, that financial data is not stored, retention, the
-   self-service deletion path (`disconnect_quickbooks`), and a contact.
-3. **Terms of service**, linked from the connect page via `TERMS_URL` /
-   `PRIVACY_URL`.
-4. **A security contact / disclosure path** — **alex@aircfo.com** (subject line
-   "Security").
+The connector became airCFO-internal in September 2026, so the public-launch
+checklist this section used to hold no longer applies. What survives it:
+
+1. **Intuit's developer terms still bind us.** The production app passed
+   Intuit's self-attested assessment, and that attestation has to stay true as
+   the server changes — this document is the record of what was attested. An
+   internal app is not exempt; it is simply well under the connection threshold
+   that triggers a review.
+2. **Client data still reaches Anthropic**, because that is the point of the
+   tool. Nothing is stored on our side beyond credentials and company metadata,
+   and airCFO's engagement terms are what cover a client's data being read by
+   the firm's own tooling.
+3. **A security contact** — **alex@aircfo.com** (subject line "Security").
 
 ## Reporting a vulnerability
 

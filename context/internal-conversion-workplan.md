@@ -196,7 +196,7 @@ stall an OAuth round trip and all 37 existing rows self-heal as they are used. A
 request that named no session at all. A test caught a real flaw on the way: `created_at` is
 millisecond-resolution, so `findByRealmAndEmail` orders by `rowid` too or a tie returns the older row.
 
-## PR 3 · `feat/google-identity` — who is calling (P2) · Wed 09-16 → Mon 09-21 · 1–2 sessions · Engineering review
+## PR 3 · `feat/google-identity` — who is calling (P2) · **open as [#16](https://github.com/aircfo/qbo-mcp/pull/16), CI pending; blocked on the Railway variables** (2026-09-10, ahead of the window) · Engineering review
 
 **Closes G5, G7; removes the public connect page.** Copies `aircfo-mcp`'s gate: `src/auth/google-idp.ts`
 (`googleAuthUrl`, `verifyGoogleCode` on `google-auth-library`'s `OAuth2Client`, scopes
@@ -229,6 +229,18 @@ once per client folder and the claude.ai connector once. Watch `login_denied` fo
 teammate's verified email; removing an email from `ALLOWED_USERS` blocks that person's next call
 without a redeploy of anything else; `list_connections` shows every row with a company name; the
 Gmail user is either allowlisted or refused, per 0.2.
+
+**As built** (2026-09-10). One departure, recorded in `decisions.md`: the identity column is `email`
+plus an `email_verified` flag, not a second `authorized_by` column. Less to keep consistent, and it
+leaves `reconcileConnection`'s (realm, email) key untouched — which is what makes the one-time
+re-authorization *fold onto* the row it upgrades instead of adding a fourteenth row for Alex.
+Added beyond the list: the five connect-flow pages consolidated into one module, and `purgeExpired`
+given an injectable clock so its behaviour is exactly testable (the `RateLimiter` convention).
+
+**Hard precondition before merge.** `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+`ALLOWED_USERS`, `ALLOWED_DOMAIN` and `ADMIN_USERS` must exist in the "QBO MCP Server" Railway
+variables first. Boot-time validation exits without them, so the deploy fails its healthcheck —
+safely, since Railway keeps the previous version running, but it fails.
 
 ## PR 4 · `chore/teardown` + two sibling PRs — the public surface (P2) · Thu 09-17 → Fri 09-18, parallel to PR 3 · ½ session each
 

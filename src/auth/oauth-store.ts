@@ -22,9 +22,25 @@ export interface PendingAuth {
   codeChallenge: string;
   scopes: string[];
   mcpState?: string;
-  /** Self-reported email collected on the connect page (unverified). */
+  /** The Google-verified address, attached once sign-in completes. */
   email?: string;
+  emailVerified?: boolean;
   termsAcceptedAt?: number;
+}
+
+/** What the confirmation page needs to finish, or undo, a connection. */
+export interface PendingConfirm {
+  connectionId: string;
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+  mcpState?: string;
+  /**
+   * Whether the connection was created by this flow. A cancel deletes a row it
+   * created, and leaves alone one it merely refreshed — that row belongs to
+   * connections this person already had, and deleting it would break them.
+   */
+  created: boolean;
 }
 
 export interface IssuedTokens {
@@ -106,6 +122,7 @@ export class OAuthStore {
           scopes: input.scopes,
           mcpState: input.mcpState,
           email: input.email,
+          emailVerified: input.emailVerified,
           termsAcceptedAt: input.termsAcceptedAt,
         }),
         Date.now() + TEN_MINUTES_MS,
@@ -122,6 +139,7 @@ export class OAuthStore {
           scopes?: string[];
           mcpState?: string;
           email?: string;
+          emailVerified?: boolean;
           termsAcceptedAt?: number;
         })
       : {};
@@ -132,7 +150,51 @@ export class OAuthStore {
       scopes: meta.scopes ?? [],
       mcpState: meta.mcpState,
       email: meta.email,
+      emailVerified: meta.emailVerified,
       termsAcceptedAt: meta.termsAcceptedAt,
+    };
+  }
+
+  // --- Pending confirmation (the "is this the right company?" step) ---
+
+  /** Returns the opaque token the confirmation page posts back. */
+  createPendingConfirm(input: PendingConfirm): string {
+    const token = newToken();
+    this.db
+      .prepare(
+        `INSERT INTO oauth_tokens
+          (token_hash, kind, client_id, connection_id, code_challenge, redirect_uri, metadata, expires_at, created_at)
+         VALUES (?, 'pending_confirm', ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        hash(token),
+        input.clientId,
+        input.connectionId,
+        input.codeChallenge,
+        input.redirectUri,
+        JSON.stringify({ mcpState: input.mcpState, created: input.created }),
+        Date.now() + TEN_MINUTES_MS,
+        Date.now(),
+      );
+    return token;
+  }
+
+  consumePendingConfirm(token: string): PendingConfirm | null {
+    const row = this.take(token, "pending_confirm");
+    if (!row) return null;
+    const meta = row.metadata
+      ? (JSON.parse(row.metadata) as {
+          mcpState?: string;
+          created?: boolean;
+        })
+      : {};
+    return {
+      connectionId: row.connection_id!,
+      clientId: row.client_id!,
+      redirectUri: row.redirect_uri!,
+      codeChallenge: row.code_challenge!,
+      mcpState: meta.mcpState,
+      created: meta.created === true,
     };
   }
 
@@ -258,6 +320,19 @@ export class OAuthStore {
         "UPDATE oauth_tokens SET revoked_at = ? WHERE connection_id = ? AND revoked_at IS NULL",
       )
       .run(Date.now(), connectionId);
+  }
+
+  /**
+   * Drop token rows that expired more than `graceMs` ago. Nothing pruned them
+   * before, so the table accumulated every access token ever issued — 923 rows
+   * for 37 connections. The grace period keeps recently-expired rows around
+   * long enough to stay useful when reading logs.
+   */
+  purgeExpired(graceMs: number, now: number = Date.now()): number {
+    const result = this.db
+      .prepare(`DELETE FROM oauth_tokens WHERE expires_at < ?`)
+      .run(now - graceMs);
+    return result.changes;
   }
 
   // --- internals ---
