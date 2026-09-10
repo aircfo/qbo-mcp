@@ -318,3 +318,48 @@ predate the reconcile change.
 **Also:** expired `oauth_tokens` rows are swept hourly with a week of grace.
 Nothing pruned them before, so the table held 923 access tokens for 37
 connections.
+
+## 2026-09-10 — Revocation: name the token, and only revoke when ending access is the intent
+
+**The incident.** The first real re-authorization through the new identity gate
+produced a connection that was already dead: Intuit answered
+`401 AuthenticationFailed, errorCode 3200` seconds after a successful token
+exchange, and the confirmation page showed "(name unavailable)" because its
+CompanyInfo lookup was the first call to hit it.
+
+**Root cause, and it is one line.** `OAuthClient.revoke(params)` reads
+`params.access_token || params.refresh_token || <the client's own current
+token>`. Our wrapper called `this.oauth.revoke({ token })` — a key the library
+ignores. So every revoke fell through to the client's own token, and that client
+is a long-lived singleton whose token state was last written by `createToken`.
+A re-authorization therefore revoked **the access token it had just minted**.
+
+Two things follow from the same bug. Revocation has never actually worked on
+this server: `disconnect_quickbooks` hit the same fallback with an empty token
+state, which is part of why G4 observed old Intuit grants staying live for 100
+days. And the failure only became visible now because nothing used to make a
+QuickBooks call immediately after connecting.
+
+**Decisions.**
+
+1. **`IntuitOAuth.revoke` passes `{ refresh_token }`.** `IntuitOAuth` now takes
+   its client by constructor injection so the parameter name is covered by a
+   test rather than by care.
+2. **`reconcileConnection` revokes nothing.** The superseded refresh token and
+   the one Intuit just issued belong to the same authorization — same app,
+   company and person — and Intuit's revoke ends the authorization, not an
+   individual token. So revoking the old one risks taking the new one with it,
+   and the old one is superseded regardless. The function is now synchronous,
+   which is a fair signal that it does no I/O.
+3. **Cancelling only revokes a connection this flow created.** Cancel used to
+   revoke unconditionally, which for a *reused* row would have ended an
+   authorization shared with that person's other MCP clients.
+4. **Revocation stays where ending access is the intent:**
+   `disconnect_quickbooks`, the administrative `revoke_connection`, and
+   cancelling a newly created connection — and it works now.
+
+**Known follow-up, not taken here.** `QboClientManager` refreshes on expiry
+only, so a stored access token that Intuit has invalidated early keeps failing
+for up to an hour instead of triggering one refresh-and-retry. That would have
+softened this incident, and it is worth doing, but it would also have hidden the
+bug; it belongs in its own change.

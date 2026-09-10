@@ -41,29 +41,25 @@ function deps(existing: Connection | null): ReconcileDeps & {
   create: ReturnType<typeof vi.fn>;
   updateTokens: ReturnType<typeof vi.fn>;
   setEmailVerified: ReturnType<typeof vi.fn>;
+  findByRealmAndEmail: ReturnType<typeof vi.fn>;
 } {
   const create = vi.fn(() => "created-id");
   const updateTokens = vi.fn();
   const setEmailVerified = vi.fn();
+  const findByRealmAndEmail = vi.fn(() => existing);
   return {
-    connections: {
-      findByRealmAndEmail: vi.fn(() => existing),
-      create,
-      updateTokens,
-      setEmailVerified,
-    },
-    revokeIntuitToken: vi.fn(async () => {}),
-    onRevokeFailed: vi.fn(),
+    connections: { findByRealmAndEmail, create, updateTokens, setEmailVerified },
     create,
     updateTokens,
     setEmailVerified,
+    findByRealmAndEmail,
   };
 }
 
 describe("reconcileConnection", () => {
-  it("creates a connection the first time a person connects a company", async () => {
+  it("creates a connection the first time a person connects a company", () => {
     const d = deps(null);
-    const result = await reconcileConnection(d, FRESH);
+    const result = reconcileConnection(d, FRESH);
 
     expect(result).toEqual({ connectionId: "created-id", reused: false });
     expect(d.create).toHaveBeenCalledWith(
@@ -74,12 +70,11 @@ describe("reconcileConnection", () => {
       }),
     );
     expect(d.updateTokens).not.toHaveBeenCalled();
-    expect(d.revokeIntuitToken).not.toHaveBeenCalled();
   });
 
-  it("reuses the existing row on a repeat authorization, keeping its id", async () => {
+  it("reuses the existing row on a repeat authorization, keeping its id", () => {
     const d = deps(existingConnection());
-    const result = await reconcileConnection(d, FRESH);
+    const result = reconcileConnection(d, FRESH);
 
     // The id has to survive: other MCP clients on this company hold downstream
     // tokens that resolve to it, and a new id would break every one of them.
@@ -92,56 +87,45 @@ describe("reconcileConnection", () => {
     });
   });
 
-  it("revokes the credential it is about to drop", async () => {
-    const d = deps(existingConnection());
-    await reconcileConnection(d, FRESH);
-    expect(d.revokeIntuitToken).toHaveBeenCalledWith("old-refresh");
-  });
 
-  it("does not revoke when Intuit handed back the same refresh token", async () => {
-    // Revoking a refresh token also kills its access tokens, so revoking a
-    // value Intuit just reissued would destroy the connection being made.
-    const d = deps(existingConnection({ refreshToken: FRESH.refreshToken }));
-    await reconcileConnection(d, FRESH);
 
-    expect(d.revokeIntuitToken).not.toHaveBeenCalled();
-    expect(d.updateTokens).toHaveBeenCalledOnce();
-  });
-
-  it("stores the new credentials even when the revoke fails", async () => {
-    const d = deps(existingConnection());
-    const boom = new Error("Intuit revoke endpoint is down");
-    d.revokeIntuitToken = vi.fn(async () => {
-      throw boom;
-    });
-
-    const result = await reconcileConnection(d, FRESH);
-
-    expect(d.onRevokeFailed).toHaveBeenCalledWith(boom, "existing-id");
-    expect(d.updateTokens).toHaveBeenCalledOnce();
-    expect(result.reused).toBe(true);
-  });
 
   it("promotes a row whose address predates the identity gate", async () => {
     // Every connection made before the gate has an unverified, typed-in
     // address. When the same person proves that address through Google, the
     // row they already had is the one that should carry the verified identity.
     const d = deps(existingConnection({ emailVerified: false }));
-    await reconcileConnection(d, FRESH);
+    reconcileConnection(d, FRESH);
     expect(d.setEmailVerified).toHaveBeenCalledWith("existing-id", true);
   });
 
-  it("leaves an already-verified row alone", async () => {
+  it("leaves an already-verified row alone", () => {
     const d = deps(existingConnection({ emailVerified: true }));
-    await reconcileConnection(d, FRESH);
+    reconcileConnection(d, FRESH);
     expect(d.setEmailVerified).not.toHaveBeenCalled();
   });
 
-  it("creates without a lookup when no email was collected", async () => {
+  it("revokes nothing, so the credentials it just stored stay usable", () => {
+    // The bug this replaces: reconcile revoked the superseded refresh token,
+    // and Intuit's revoke ends the whole authorization — so a connection came
+    // back from a successful re-authorization already dead, answering 401
+    // AuthenticationFailed. There is no revoke hook here any more; this test
+    // asserts the shape of the dependency, so re-adding one is a visible change.
     const d = deps(existingConnection());
-    const result = await reconcileConnection(d, { ...FRESH, email: null });
+    reconcileConnection(d, FRESH);
+    expect(Object.keys(d.connections).sort()).toEqual([
+      "create",
+      "findByRealmAndEmail",
+      "setEmailVerified",
+      "updateTokens",
+    ]);
+  });
 
-    expect(d.connections.findByRealmAndEmail).not.toHaveBeenCalled();
+  it("creates without a lookup when no email was collected", () => {
+    const d = deps(existingConnection());
+    const result = reconcileConnection(d, { ...FRESH, email: null });
+
+    expect(d.findByRealmAndEmail).not.toHaveBeenCalled();
     expect(result.reused).toBe(false);
   });
 });

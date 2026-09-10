@@ -56,21 +56,25 @@ export const connectCancelHandler: RequestHandler = async (req, res) => {
     return;
   }
 
-  const connection = connectionStore.get(pending.connectionId);
-  if (connection) {
-    try {
-      await intuitOAuth.revoke(connection.refreshToken);
-    } catch (err) {
-      // Proceed regardless: the local teardown is what stops this server from
-      // using the grant, and it must not depend on Intuit being reachable.
-      log.warn(
-        { connectionId: pending.connectionId, err: String(err) },
-        "intuit_revoke_failed",
-      );
-    }
-  }
-
+  // Only a connection this flow *created* is torn down. One it merely
+  // refreshed is a company this person already had connected, and its
+  // authorization is shared with their other MCP clients — revoking it here
+  // would break them, and Intuit's revoke ends the authorization rather than
+  // an individual token.
   if (pending.created) {
+    const connection = connectionStore.get(pending.connectionId);
+    if (connection) {
+      try {
+        await intuitOAuth.revoke(connection.refreshToken);
+      } catch (err) {
+        // Proceed regardless: the local teardown is what stops this server
+        // from using the grant, and it must not wait on Intuit being reachable.
+        log.warn(
+          { connectionId: pending.connectionId, err: String(err) },
+          "intuit_revoke_failed",
+        );
+      }
+    }
     oauthStore.revokeConnectionTokens(pending.connectionId);
     connectionStore.delete(pending.connectionId);
   }
