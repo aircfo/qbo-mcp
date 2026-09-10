@@ -21,7 +21,7 @@ deploy (Railway auto-deploys). Verify each deploy with `railway logs` before cal
 |---|---|---|---|
 | 0.1 | Rulings logged in `context/decisions.md` | Claude | **done** 2026-09-10 |
 | 0.2 | Identify `aarondras@gmail.com` | Alex | **identified and ruled: notify, then offboard.** Almost certainly **Aaron Drasner, Controller, Union Square Donuts** — HubSpot contact `aaron@unionsquaredonuts.com`, created 2026-06-18, source `asg-webinar`, lifecycle **lead**. Note drafted below; Alex sends it before 09-21 |
-| 0.3 | Google OAuth client for qbo-mcp | Alex, ~10 min | **spec below, ready to execute — the only P0 item still open, and PR 3 waits on it** |
+| 0.3 | Google OAuth client for qbo-mcp | Alex | **done 2026-09-10.** Production redirect URI only; the Railway sandbox is being sunset, so proving moves to local dev — **one more URI to add, see below** |
 | 0.4 | `ALLOWED_USERS` / `ADMIN_USERS` | Alex | **ruled: every airCFO team member**, not the eleven proposed. Expressed as `ALLOWED_USERS=*` — see below for why a sentinel and not a 65-name list |
 | 0.4b | Kim's approver identity | Alex | **ruled: Kim gets her own `@aircfo.com` Google account** before 09-21, so the person who reviews a batch is the person who approves it. PR 5's design assumes this |
 | 0.5 | Tell the team | Alex | **ruled: Alex posts both messages.** Drafts below, ready to copy |
@@ -83,26 +83,46 @@ Two notes on the draft. **The date says Monday September 22**, one day after the
 never cut off before the note's own deadline. **It offers a call, not an apology** — he is a lead,
 the tool worked, and the reason it is going away is that it became load-bearing internally.
 
-### 0.3 — the Google OAuth client, ready to create
+### 0.3 — the Google OAuth client: created, with one URI still to add
 
-Same Google Cloud project as `aircfo-mcp`, so one consent screen serves both connectors.
+**Created 2026-09-10** in the same Google Cloud project as `aircfo-mcp`, with the production
+redirect URI `https://qbo-mcp-production-5667.up.railway.app/oauth/google/callback`.
+`GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` go into the "QBO MCP Server" Railway
+project. No scopes beyond the defaults: the gate uses `openid email profile` and reads the verified
+`id_token`, never Google data.
 
-| Field | Value |
-|---|---|
-| Type | Web application |
-| Name | `qbo-mcp (airCFO QBO Gateway)` |
-| User type | Internal (Workspace) |
-| Authorized redirect URI 1 | `https://qbo-mcp-production-5667.up.railway.app/oauth/google/callback` |
-| Authorized redirect URI 2 | `https://qbo-mcp-sandbox.up.railway.app/oauth/google/callback` |
+**Alex is sunsetting the Railway sandbox service, so its URI was deliberately not added.** That
+removes the deployed rehearsal surface both PR 3 and PR 5 were going to use. The replacement is
+local development, which this repo is already configured for:
 
-Then `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` into **both** Railway projects
-("QBO MCP Server" and "QBO MCP (Sandbox)"). No scopes to configure beyond the defaults: the gate
-uses `openid email profile` and reads the verified `id_token`, never Google data.
+```
+PUBLIC_URL=http://localhost:8080
+INTUIT_REDIRECT_URI=http://localhost:8080/oauth/intuit/callback
+INTUIT_ENVIRONMENT=sandbox
+```
 
-**Worth knowing:** the sandbox project auto-deploys `main` too — it is running the same
-`ebaa7ff8` as production right now. So PR 3's and PR 5's code reach the sandbox the moment they
-merge, which is what makes sandbox-first proving cheap. The switch that keeps them apart is
-`WRITES_ENABLED`, set per project.
+`pnpm dev` against an **Intuit sandbox company** is a better write-development target than a hosted
+sandbox anyway: no deploy cycle between edits, and a posted entry is inspectable in Intuit's own
+sandbox UI. No code changes for it — `INTUIT_ENVIRONMENT=sandbox` already routes to Intuit's sandbox
+APIs and the local database is a separate file.
+
+**The one thing to add — a 30-second edit to the client just created:**
+
+```
+http://localhost:8080/oauth/google/callback
+```
+
+Google allows `http` for `localhost` redirect URIs on a Web application client. Without it the
+Google gate cannot be exercised anywhere but production, and PR 5's writes cannot be proven against
+any QuickBooks company before they point at real books.
+
+**What local dev cannot rehearse.** Claude Code reaches `http://localhost:8080`; **claude.ai cannot**
+— it needs a public HTTPS URL and uses its own redirect (`https://claude.ai/api/mcp/auth_callback`).
+81 of the registered clients on this server are claude.ai, so that is how most of the team connects,
+and with the sandbox gone that path gets its first real exercise in production. Mitigation, carried
+into PR 3's deploy order: **Alex re-authorizes through claude.ai himself immediately after the 09-21
+deploy, before the team notice goes out.** Rollback needs no deploy — `ALLOWED_USERS` is an
+environment variable — and a genuinely broken gate is one revert away.
 
 ### 0.4 — the allowlist: every airCFO team member
 
@@ -262,10 +282,16 @@ re-check.
 | `src/index.ts` | routes: drop `/connect/start`; add `/oauth/google/callback`, `/connect/confirm`, `/connect/cancel`; `/` returns a one-line "airCFO QBO Gateway — internal" page; `resourceName` stays "airCFO QBO Gateway" |
 | tests | `access.test.ts` (domain, allowlist, case, unverified email refused); `google-callback` gate with an injected verifier; `pending_confirm` issue/consume/expiry in `oauth-store.test.ts`; `provider.test.ts`: `verifyAccessToken` refuses a legacy row (no `authorized_by`) and a de-listed email; `admin` tools registered for an admin session only |
 
-**Deploy order.** Sandbox project first with the real Google client and a two-person allowlist;
-confirm a non-listed Google account is refused and the confirmation page shows the sandbox company.
-Then production on a **Monday morning** (09-21) after the 24 h notice: every teammate re-runs `/mcp`
-once per client folder and the claude.ai connector once. Watch `login_denied` for the first day.
+**Deploy order.** Locally first (`pnpm dev`, the localhost redirect URI from 0.3, `ALLOWED_USERS`
+set to two names): confirm a non-listed Google account is refused, an unverified address is refused,
+and the confirmation page names the sandbox company and its realm. Then production on a **Monday
+morning** (09-21) after the 24 h notice.
+
+Then in this order, because the claude.ai path cannot be rehearsed anywhere else: **Alex
+re-authorizes through claude.ai first and confirms it works**, then the notice goes out and everyone
+re-runs `/mcp` once per client folder. Watch `login_denied` for the first day. If the gate
+misbehaves, widening `ALLOWED_USERS` is an environment-variable change with no deploy; reverting the
+merge is the backstop.
 
 **Done when:** a Google account outside the allowlist cannot connect; `connection_status` shows the
 teammate's verified email; removing an email from `ALLOWED_USERS` blocks that person's next call
@@ -282,7 +308,7 @@ Gmail user is either allowlisted or refused, per 0.2.
 | `docs/` | delete the Jekyll site. The getting-started content that still applies to teammates moves into `README.md` |
 | `README.md` | rewrite for the internal posture: what it is, who may use it (allowlist), how to connect from a client folder, the identity check with the realm, the read tools, the write tools and their approval flow (PR 5), the admin tools, operations. Keep the Intuit OSS attribution and `LICENSE` |
 | `SECURITY.md` | rewrite: team identity, write controls, the audit table, what the tool can do to a client's books and who can do it, incident response (rotate `TOKEN_ENCRYPTION_KEY`, revoke, notify). Drop the "going public" checklist and the `docs/security-details.md` sync note |
-| `DEPLOY.md` | the Google client setup, the new variables, and a **Sandbox** section: the "QBO MCP (Sandbox)" Railway project is this same code with `INTUIT_ENVIRONMENT=sandbox`, used to develop and prove writes |
+| `DEPLOY.md` | the Google client setup and the new variables, plus a **Local sandbox development** section in place of a Railway-sandbox one: `pnpm dev` with `INTUIT_ENVIRONMENT=sandbox`, an Intuit sandbox company, and the localhost redirect URIs. The "QBO MCP (Sandbox)" Railway project is being sunset (Alex, 2026-09-10) and must not be documented as a target |
 | `context/intuit-launch-requirements.md` | one line at the top: superseded by the internal decision; kept for the pricing facts |
 | `aircfo/claude-startup-finance` (sibling PR) | remove the hosted URL from `plugins/finance-contextos/.mcp.json`; `CHANGELOG`; version 0.9.1. The context-builder skill already degrades without the connector. **The README cannot say "self-host `qbo-mcp`" any more:** rows 64, 157 and the `finance-contextos` README both link `github.com/aircfo/qbo-mcp`, which goes private in this same PR, so a public plugin would point the world at a 404. Point at [`intuit/quickbooks-online-mcp-server`](https://github.com/intuit/quickbooks-online-mcp-server) instead — MIT, single-user, single-company, which is what a plugin user actually wants — or drop the QuickBooks connector from the plugin entirely. **Alex's call; not decided yet.** The same substitution is already in Aaron's note |
 | `bookkeeping-automation` (sibling PR) | `connectors/registry.json` qbo: `identityCheck` compares `realmId` from `get_company_info` to the client README; `authRunbook` gains the Google sign-in step and drops the #52 defect note once PR 1 is verified; `playbooks/00-operator-setup.md` and `01-scaffold-and-connect.md` the same; key question #52 → `answered` with the date and the cause |
@@ -305,10 +331,16 @@ file list.
 | `DEPLOY.md` | how to enable writes on one connection (`set_writes_enabled`) and how to turn them all off (`WRITES_ENABLED=false`) |
 | tests | `_writes.test.ts`: canonical form stable across key order and whitespace; token bound to connection, email and hash, expires, single-use; unbalanced entry refused; `Payment` / `Transfer` / `BillPayment` refused by type; funding line refused; the sparse payload carries every line. `writes.test.ts` with a fake `qb`: read-modify-write sends the SyncToken; a SyncToken conflict fails that item and the batch continues; a replayed `batch_key` returns the stored result and posts nothing; dry-run writes an audit row too |
 
-**Sandbox proof (Wed 09-23 → Thu 09-24).** Sandbox project: `WRITES_ENABLED=true`, Google
-variables, `set_writes_enabled` on the sandbox company. Categorize three Purchases and one Deposit
-dry-run → commit; create two journal entries; check each in the sandbox UI; read them back with
-`get_write_log`.
+**Sandbox proof (Wed 09-23 → Thu 09-24).** Locally: `WRITES_ENABLED=true`, the Google variables,
+`set_writes_enabled` on a connected Intuit sandbox company. Categorize three Purchases and one
+Deposit dry-run → commit; create two journal entries; check each in Intuit's sandbox UI; read them
+back with `get_write_log`. Then exercise three guardrails by hand as well as in tests: a stale
+approval token, a batch edited after approval, and a replayed `batch_key`.
+
+**Consequence for the bookkeeping repo:** the September plan's addendum point 4 says "the sandbox QBO
+connector is for writes only and is not in the repo". After the sunset that is stale — there is no
+sandbox connector to point Kevin at. PR 4's sibling PR should say write development happens locally
+and Kevin's read-only runs stay on production.
 
 **Production (Fri 09-25 → Wed 09-30).** Deploy with `WRITES_ENABLED=true` and `writes_enabled = 0`
 on every connection; Alex enables it on the airCFO connections only. Dress rehearsal 09-28 → 09-30
@@ -352,8 +384,10 @@ P0 ──► PR 1 ──► PR 2 ──► PR 3 ──► PR 5 ──► go/no-g
 - **PR 1 does not end the re-auths** (48-hour check still shows streaks): read `refresh_token_rejected`
   in the logs; if present, a small follow-up PR makes refresh rotation idempotent with a 10-minute
   grace window. Both hypotheses are then measured, not argued.
-- **The Google client is not ready** (0.3 slips): PR 1 and PR 2 ship regardless; PR 3 waits; PR 5's
-  commit mode is blocked by ruling 4, dry-run is not.
+- **The localhost redirect URI is not added:** PR 3 still ships, since its logic is unit-tested, but
+  its first real exercise becomes production on 09-21 and PR 5's writes cannot be proven against any
+  QuickBooks company before pointing at airCFO's real books. The one dependency worth chasing, and a
+  30-second edit to a client that already exists.
 - **PR 5 slips past 09-30:** 10-02 runs dry-run only and Kim posts from the worksheet — the September
   plan's stated fallback. Order of what gives, unchanged: writes first, read gaps second, PR 1 never.
 - **Re-auth day goes badly:** the confirmation page and `login_denied` lines say why; the allowlist is
