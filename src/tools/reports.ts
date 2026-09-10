@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type QuickBooks from "node-quickbooks";
-import { definedOnly, promisify, shapeReport } from "./_format.js";
+import {
+  definedOnly,
+  promisify,
+  requireBothDates,
+  shapeReport,
+} from "./_format.js";
 import { runQbo } from "./_shared.js";
 
 type QboCb = (err: unknown, data: unknown) => void;
@@ -16,12 +21,40 @@ const dateRange = {
   start_date: z
     .string()
     .optional()
-    .describe("Start of the reporting period, YYYY-MM-DD."),
+    .describe(
+      "Start of the reporting period, YYYY-MM-DD. Pass both dates or neither: QuickBooks ignores a lone date and reports on the current period instead.",
+    ),
   end_date: z
     .string()
     .optional()
-    .describe("End of the reporting period, YYYY-MM-DD."),
+    .describe(
+      "End of the reporting period, YYYY-MM-DD. Pass both dates or neither — for a point-in-time balance sheet, pass the first day of the period as start_date and the as-of date as end_date.",
+    ),
 };
+
+/**
+ * QBO's account-type vocabulary, exactly as the Reports API spells it: no
+ * spaces, CamelCase. An unrecognised spelling is answered with HTTP 400 by
+ * Intuit, so the values are an enum here and a caller sees the list instead.
+ */
+const ACCOUNT_TYPES = [
+  "Bank",
+  "AccountsReceivable",
+  "OtherCurrentAsset",
+  "FixedAsset",
+  "OtherAsset",
+  "AccountsPayable",
+  "CreditCard",
+  "OtherCurrentLiability",
+  "LongTermLiability",
+  "Equity",
+  "Income",
+  "CostOfGoodsSold",
+  "Expense",
+  "OtherIncome",
+  "OtherExpense",
+] as const;
+
 const accountingMethod = z
   .enum(["Cash", "Accrual"])
   .optional()
@@ -139,6 +172,11 @@ function runReport(
   caller: ReportCaller,
   defaultMaxRows?: number,
 ): Promise<CallToolResult> {
+  // Every report funnels through here, so the half-a-date-range guard is a
+  // server guarantee rather than something each tool has to remember.
+  const dateError = requireBothDates(args);
+  if (dateError) return Promise.resolve(dateError);
+
   const { format, max_rows, ...qboParams } = args;
   const maxRows = typeof max_rows === "number" ? max_rows : defaultMaxRows;
   return runQbo(connectionId, async (qb) =>
@@ -293,10 +331,10 @@ export function registerReportTools(
           .optional()
           .describe("Filter GL to one customer by QBO id."),
         account_type: z
-          .string()
+          .enum(ACCOUNT_TYPES)
           .optional()
           .describe(
-            "Filter to accounts of this type, e.g. 'Expense' or 'CostOfGoodsSold'.",
+            "Filter to accounts of this type. One call per type is the standard way to sweep a full ledger.",
           ),
         columns: z
           .string()
