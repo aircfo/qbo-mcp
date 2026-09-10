@@ -26,7 +26,7 @@ deploy (Railway auto-deploys). Verify each deploy with `railway logs` before cal
 | 0.5 | Tell the team (Slack): PR 1 ends the "reconnect doesn't work" defect this week; PR 3 will force **one** re-authorization of every QuickBooks connector the day it ships, announced 24 h ahead | Alex | posted |
 | 0.6 | Kevin: note the date and time of any "server needs authentication" event from 09-14 on, so PR 1's effect is measurable from his side too | Kevin | log kept in the categorize packet's *Steps observed* |
 
-## PR 1 · `fix/session-404-timeouts-ci` — unattended reads (P1) · Mon 09-14 → Tue 09-15 · 1 session
+## PR 1 · `fix/session-404-timeouts-ci` — unattended reads (P1) · **open as [#13](https://github.com/aircfo/qbo-mcp/pull/13), CI green, awaiting review** (2026-09-10, ahead of the window)
 
 **Closes G1, G2, G14, G16.** The two-line fix that ends the hourly re-auth, plus the guards that
 make a failed QuickBooks call say why.
@@ -49,6 +49,23 @@ shows the 400 share falling from 31% toward zero and `session_not_found` lines a
 place; Kevin leaves a session idle for more than 30 minutes and the next tool call succeeds without
 `/mcp`; a deliberately slow call (or the next Intuit slowness) returns a tool error within 60 s
 naming the fault instead of a 504 from the edge.
+
+**As built** (2026-09-10). 81 tests pass on Node 22, CI green on the first run. Two additions to the
+list above, both to make the fix checkable: `mcp_request` gained a `method` field, and GET and DELETE
+are logged at all (only POST was, which is why every 400 measured in §1 was a POST). Two subtractions:
+no separate `reports-params.test.ts` — the date guard is tested beside the other pure helpers in
+`format.test.ts`, and a zod enum is declarative config, not logic worth a test; and no grace window on
+refresh rotation — `refresh_token_rejected` now measures whether that second hypothesis is real
+before anyone writes code for it. Also corrected two stale claims in `SECURITY.md` and its published
+copy (session mismatch answered 403, idle eviction 30 min).
+
+**The post-merge check, in one place.** Merging deploys; then over 48 h:
+
+```sh
+railway logs -n 5000 --json -f 'mcp_request'                                  # 400 share, from 31%
+railway logs -n 5000 --json -f 'session_not_found'                            # what replaces them
+railway logs -n 5000 --json -f 'refresh_token_rejected OR qbo_upstream_error'  # the second hypothesis
+```
 
 ## PR 2 · `feat/connection-identity-tools` — realm, status, no orphans (P1) · Tue 09-15 → Wed 09-16 · ½–1 session
 
