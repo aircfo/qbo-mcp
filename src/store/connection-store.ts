@@ -93,6 +93,39 @@ export class ConnectionStore {
   }
 
   /**
+   * The most recent connection for one person and one company, used to fold a
+   * re-authorization into the row it replaces instead of adding another.
+   *
+   * Ordered newest-first because the table already holds several rows per pair
+   * — every re-authorization made one before this existed. `rowid` breaks a
+   * tie on `created_at`, which is only millisecond-resolution: without it two
+   * authorizations in the same millisecond leave the choice to SQLite, and it
+   * does not pick the later one.
+   */
+  findByRealmAndEmail(realmId: string, email: string): Connection | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM connections
+         WHERE realm_id = ? AND email = ?
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(realmId, email) as ConnectionRow | undefined;
+    return row ? this.toConnection(row) : null;
+  }
+
+  /**
+   * Cache the company's display name. Not secret and not authoritative — it is
+   * what an admin listing shows instead of a bare realm id.
+   */
+  setCompanyName(id: string, companyName: string): void {
+    this.db
+      .prepare(
+        `UPDATE connections SET company_name = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(companyName, Date.now(), id);
+  }
+
+  /**
    * Persist a freshly refreshed token pair. Always pass whatever refresh token
    * Intuit last returned — it rotates periodically and the latest value must
    * be saved or refresh eventually breaks.

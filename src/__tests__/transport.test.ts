@@ -8,7 +8,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // exercised by session handling, so it is replaced wholesale.
 vi.mock("../deps.js", () => ({
   clientManager: { getClient: vi.fn() },
-  connectionStore: { get: vi.fn(), create: vi.fn(), delete: vi.fn() },
+  connectionStore: {
+    get: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn(),
+    setCompanyName: vi.fn(),
+    findByRealmAndEmail: vi.fn(),
+  },
   oauthStore: { revokeConnectionTokens: vi.fn() },
   intuitOAuth: { revoke: vi.fn() },
   oauthProvider: {},

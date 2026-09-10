@@ -168,7 +168,7 @@ railway logs -n 5000 --json -f 'session_not_found'                            # 
 railway logs -n 5000 --json -f 'refresh_token_rejected OR qbo_upstream_error'  # the second hypothesis
 ```
 
-## PR 2 · `feat/connection-identity-tools` — realm, status, no orphans (P1) · Tue 09-15 → Wed 09-16 · ½–1 session
+## PR 2 · `feat/connection-identity-tools` — realm, status, no orphans (P1) · **open as [#14](https://github.com/aircfo/qbo-mcp/pull/14)** (2026-09-10, ahead of the window)
 
 **Closes G3, G4, G10 (description), G15 (company name).**
 
@@ -185,6 +185,16 @@ railway logs -n 5000 --json -f 'refresh_token_rejected OR qbo_upstream_error'  #
 authorization by the same person for the same company does not add a row to `connections`
 (check with `context/prod-query.js`); Kevin's registry PR (see PR 4) switches the identity check to
 compare the realm.
+
+**As built** (2026-09-10). One deliberate departure: `get_company_info` keeps the company profile's
+fields at the **top level** and adds a single `connection` key, rather than nesting the payload under
+`company` as this plan said. Kevin is rehearsing against production this week and every identity
+check reads `CompanyName`/`LegalName`; re-shaping that tool mid-rehearsal buys nothing. The company
+name is cached on first *read* rather than during the connect flow, so a slow Intuit call cannot
+stall an OAuth round trip and all 37 existing rows self-heal as they are used. Added beyond the list:
+`session_id_missing` logging, which is what lets the PR 1 log check separate a dead session from a
+request that named no session at all. A test caught a real flaw on the way: `created_at` is
+millisecond-resolution, so `findByRealmAndEmail` orders by `rowid` too or a tie returns the older row.
 
 ## PR 3 · `feat/google-identity` — who is calling (P2) · Wed 09-16 → Mon 09-21 · 1–2 sessions · Engineering review
 

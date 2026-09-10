@@ -2,6 +2,7 @@ import type { RequestHandler } from "express";
 import { env } from "../config/env.js";
 import { connectionStore, intuitOAuth, oauthStore } from "../deps.js";
 import { log } from "../log.js";
+import { reconcileConnection } from "./connection-reconcile.js";
 
 function errorPage(message: string): string {
   return `<!doctype html><html><body style="font-family:system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#fff0f0">
@@ -98,16 +99,27 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
       return;
     }
 
-    const connectionId = connectionStore.create({
-      realmId: tokens.realmId,
-      email: pending.email ?? null,
-      termsAcceptedAt: pending.termsAcceptedAt ?? null,
-      accessToken: tokens.accessToken,
-      accessExpiresAt: tokens.accessExpiresAt,
-      refreshToken: tokens.refreshToken,
-    });
+    const { connectionId, reused } = await reconcileConnection(
+      {
+        connections: connectionStore,
+        revokeIntuitToken: (token) => intuitOAuth.revoke(token),
+        onRevokeFailed: (err, id) =>
+          log.warn(
+            { connectionId: id, err: String(err) },
+            "intuit_revoke_failed",
+          ),
+      },
+      {
+        realmId: tokens.realmId,
+        email: pending.email ?? null,
+        termsAcceptedAt: pending.termsAcceptedAt ?? null,
+        accessToken: tokens.accessToken,
+        accessExpiresAt: tokens.accessExpiresAt,
+        refreshToken: tokens.refreshToken,
+      },
+    );
     log.info(
-      { connectionId, realmId: tokens.realmId, email: pending.email },
+      { connectionId, realmId: tokens.realmId, email: pending.email, reused },
       "connection_created",
     );
 

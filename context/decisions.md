@@ -233,3 +233,43 @@ Proposal and evidence: `context/internal-conversion-plan.md`. Execution:
 `context/internal-conversion-workplan.md`. Root cause of the hourly re-auth defect (key question
 #52 in bookkeeping-automation): evicted sessions were answered 400 instead of 404, so clients
 never re-initialized — measured at 31% of production requests.
+
+## 2026-09-10 — A repeat authorization reuses its connection row, and never replaces it
+
+Until now every completed Intuit authorization inserted a row, so re-authorizing
+the same company left the previous row behind still holding credentials that
+Intuit keeps live for 100 days. Combined with the hourly session defect — which
+made people re-authorize constantly — one person accumulated **thirteen rows for
+one company**, and the production table reached 37 rows for 9 people.
+
+**Decision:** `reconcileConnection` (`src/auth/connection-reconcile.ts`) folds a
+repeat authorization onto the most recent row for that (realm, email) pair.
+Three details are the decision, not the implementation:
+
+1. **Reuse the row, keep its id — never delete and re-create.** One person
+   legitimately runs several MCP clients against the same company (claude.ai
+   plus a Claude Code client per client folder), and each holds a downstream
+   token that resolves to this connection id. Reusing the row keeps all of them
+   working; replacing it would break every client except the one that just
+   authorized. The live table shows exactly this: two of Alex's connections to
+   airCFO's realm belong to different clients and are both in use.
+2. **Keying on the self-reported email is sound, even unverified.** Reaching
+   this code means Intuit consent for that exact company succeeded, so a caller
+   who types someone else's address gains nothing they had not already proved.
+   The key becomes a verified Google identity when sign-in moves to
+   `@aircfo.com` accounts, and this design does not depend on that.
+3. **Do not revoke a refresh token identical to the new one.** Revoking a
+   refresh token also invalidates its access tokens, so revoking a value Intuit
+   just reissued would destroy the connection being established. Guarded and
+   tested.
+
+Existing orphan rows are left alone: cleaning them up needs the admin
+`revoke_connection` tool that arrives with the identity gate. `findByRealmAndEmail`
+breaks a `created_at` tie on `rowid`, because the column is millisecond-resolution
+and SQLite does not otherwise return the later row.
+
+**Also decided here:** `connection_status` exists as a tool that answers "which
+company am I bound to" **without calling QuickBooks**. The identity check in
+the bookkeeping repo needed a fallback when the entity endpoints returned 504
+five times running, and improvised one by comparing account ids to a stored
+fingerprint. A tool that reads only our own database is the better fallback.
