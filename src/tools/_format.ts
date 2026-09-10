@@ -173,7 +173,7 @@ export interface FlatReport {
 // QBO report JSON is deeply nested and untyped third-party data, so narrowing
 // from `unknown` is genuinely required here. The casts are confined to these
 // two guards rather than scattered through the walk.
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;

@@ -802,7 +802,9 @@ export function registerReportTools(
         cleared: z
           .enum(["Cleared", "Uncleared", "Reconciled", "Deposited"])
           .optional()
-          .describe("Bank-clearing status."),
+          .describe(
+            "Bank-clearing status. 'Uncleared' with an `account` filter and a date range is the uncleared-items list for a reconciliation — QuickBooks exposes no reconciliation report through its API, so this is the closest thing to one.",
+          ),
         docnum: z
           .string()
           .optional()

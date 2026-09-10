@@ -85,4 +85,47 @@ describe("ConnectionStore", () => {
     store.delete(id);
     expect(store.get(id)).toBeNull();
   });
+
+  describe("findByRealmAndEmail", () => {
+    it("finds the connection for one person and one company", () => {
+      const id = store.create({ ...sample, email: "kim@aircfo.com" });
+      expect(store.findByRealmAndEmail("123456789", "kim@aircfo.com")?.id).toBe(
+        id,
+      );
+    });
+
+    it("returns the newest row when a pair has several", () => {
+      // The live table already looks like this: one person accumulated
+      // thirteen rows for one company before re-authorization folded them in.
+      const older = store.create({ ...sample, email: "kim@aircfo.com" });
+      const newer = store.create({ ...sample, email: "kim@aircfo.com" });
+      const found = store.findByRealmAndEmail("123456789", "kim@aircfo.com");
+      expect(found?.id).toBe(newer);
+      expect(found?.id).not.toBe(older);
+    });
+
+    it("does not match another person or another company", () => {
+      store.create({ ...sample, email: "kim@aircfo.com" });
+      expect(
+        store.findByRealmAndEmail("123456789", "someone@else.com"),
+      ).toBeNull();
+      expect(
+        store.findByRealmAndEmail("999999999", "kim@aircfo.com"),
+      ).toBeNull();
+    });
+
+    it("returns null when the stored connection has no email", () => {
+      store.create({ ...sample, email: null });
+      expect(store.findByRealmAndEmail("123456789", "kim@aircfo.com")).toBeNull();
+    });
+  });
+
+  it("caches the company name without disturbing the tokens", () => {
+    const id = store.create({ ...sample, companyName: null });
+    store.setCompanyName(id, "airCFO");
+    const conn = store.get(id);
+    expect(conn?.companyName).toBe("airCFO");
+    expect(conn?.accessToken).toBe("access-abc");
+    expect(conn?.refreshToken).toBe("refresh-xyz");
+  });
 });

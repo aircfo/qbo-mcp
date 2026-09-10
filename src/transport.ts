@@ -103,6 +103,26 @@ function sessionNotFound(
   );
 }
 
+/**
+ * Answer a non-initialize request that names no session at all with 400, as
+ * the spec prescribes. Logged under its own name so it stays distinguishable
+ * from the 404 above: both were 400s before, which made "the session died" and
+ * "the client sent no session id" impossible to tell apart in the logs.
+ */
+function sessionIdMissing(
+  req: Request,
+  res: Response,
+  connectionId: string,
+): void {
+  rpcError(
+    res,
+    400,
+    INVALID_REQUEST_CODE,
+    "Bad Request: Mcp-Session-Id header is required",
+  );
+  log.warn({ connectionId, method: req.method }, "session_id_missing");
+}
+
 /** One structured line per request, emitted when the response finishes. */
 function logWhenFinished(
   req: Request,
@@ -163,12 +183,7 @@ export const handleMcpPost: RequestHandler = async (req, res) => {
 
   if (!isInitializing(req.body)) {
     if (!sessionId) {
-      rpcError(
-        res,
-        400,
-        INVALID_REQUEST_CODE,
-        "Bad Request: Mcp-Session-Id header is required",
-      );
+      sessionIdMissing(req, res, connectionId);
       return;
     }
     const session = sessions.get(sessionId);
@@ -242,12 +257,7 @@ async function withSession(
 
   const sessionId = sessionIdFrom(req);
   if (!sessionId) {
-    rpcError(
-      res,
-      400,
-      INVALID_REQUEST_CODE,
-      "Bad Request: Mcp-Session-Id header is required",
-    );
+    sessionIdMissing(req, res, connectionId);
     return;
   }
   const session = sessions.get(sessionId);

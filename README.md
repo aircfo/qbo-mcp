@@ -65,11 +65,17 @@ a volume attaches to one instance, so this assumes a single running instance
 - [x] Batch C — customer-side reports: A/R + A/P aging detail, sales by customer/product/class, customer balances, transaction lists, class lookup
 - [ ] (deferred) Writes — out of scope for read-only v1
 
-## Tools (v1) — 41 total
+## Tools (v1) — 42 total
 
 All data tools are read-only; the only state-changing tool is `disconnect_quickbooks`.
 
-**Company:** `get_company_info`
+**Company & connection:** `get_company_info`, `connection_status`.
+`get_company_info` returns the QuickBooks company profile plus a `connection`
+object naming the **realm id**, the environment, and who authorized the
+connection — so an identity check can compare the realm QuickBooks itself
+reports rather than trusting a company name. `connection_status` returns just
+that object and makes **no call to QuickBooks**, so it still answers when
+Intuit is slow or erroring.
 
 **Reports:** `get_profit_and_loss`, `get_profit_and_loss_detail`,
 `get_balance_sheet`, `get_cash_flow`, `get_trial_balance`, `get_general_ledger`,
