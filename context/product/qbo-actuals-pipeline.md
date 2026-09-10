@@ -5,9 +5,10 @@ becomes a `decisions.md` entry once agreed
 
 ## What the QBO server is
 
-airCFO runs a small server that sits between us and QuickBooks. A client connects their
-QuickBooks company to it once, through Intuit's own approval screen, and from then on the
-server holds that connection and can read the client's books on our behalf.
+airCFO runs a small server that sits between us and QuickBooks. A client's QuickBooks
+company gets connected to it once, through Intuit's approval screen — we do that ourselves,
+because airCFO holds accountant access to our clients' books. From then on the server holds
+that connection and can read those books on our behalf.
 
 It already does the parts that are tedious and easy to get dangerously wrong: it stores
 each client's credentials encrypted, renews them before they expire, and can cut a client
@@ -28,8 +29,8 @@ are building**, and it is the reason the proposal is worth doing.
 
 **3. Let one person move quickly between clients.** A connection binds to one QuickBooks
 company, chosen at Intuit's approval screen. That binding is what keeps clients isolated —
-a session cannot reach a company nobody approved — and it is also what makes moving
-between clients slow, because today you disconnect and reconnect.
+a session cannot reach a company that was never connected — and it is also what makes
+moving between clients slow, because today you disconnect and reconnect.
 
 **This is half solved.** In Claude Code it already works: each client has its own folder,
 each folder declares its own connection, and all of them stay authorized at once, so
@@ -89,7 +90,7 @@ which client it touched.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/connections` | Every client the server holds a connection for: realm id, company name, whether the connection needs the client to re-approve it, when it last renewed. Never credentials |
+| `GET /api/connections` | Every client the server holds a connection for: realm id, company name, whether the connection needs reconnecting, when it last renewed. Never credentials |
 | `GET /api/reports/:report` | One report for one client |
 
 `:report` is a fixed list — `profit-and-loss`, `balance-sheet`, `trial-balance`,
@@ -126,8 +127,8 @@ arrays instead of two.
 
 | Status | Meaning | What the pipeline should do |
 |---|---|---|
-| `404` | No connection for that client | Ask the AM to send the client a connect link |
-| `409` | The client needs to re-approve the connection | Same, and stop retrying |
+| `404` | That company has never been connected | Someone on the team connects it once, then re-run |
+| `409` | The connection expired or was revoked | Same — reconnect once, and stop retrying meanwhile |
 | `502` | QuickBooks failed or was too slow | Retry later; the server already retried twice |
 
 **One hard rule.** This door is read-only permanently. No endpoint that changes a client's
@@ -150,25 +151,13 @@ third of the original design, along with all the renewal-race handling.
 **The client list lives with the pipeline.** The server knows realm ids and company names.
 It knows nothing about which grid a client's numbers belong in, and it shouldn't.
 
-**Onboarding a client is unchanged:** the AM sends the client a connect link, the client
-approves it at Intuit, and the credentials land in the server's encrypted store without
-passing through anyone's laptop. **Every client needs that one approval** — no scheduled
-job can reach a company nobody approved.
+**Connecting a company is a one-time step, and we do it ourselves.** Because airCFO holds
+accountant access to our clients' books, someone on the team signs in and approves the
+connection for that company — the client isn't involved. **Every company still needs that
+one connection before a scheduled job can read it**, which is what the 404 above means.
 
-## Working in this repo
+## Before you start
 
-- **Node 22.** Run commands as `mise x node@22 -- pnpm …`; the default Node on a Mac is
-  too new for one of the dependencies and the tests will fail confusingly without this.
-- Run `pnpm typecheck && pnpm test` before you push. Both also run automatically on every
-  pull request.
-- Branch, commit with a `feat:` / `fix:` / `docs:` prefix, open a pull request into `main`,
-  wait for the checks, then merge.
-- **Merging to `main` deploys to production.** There is no staging environment. Develop
-  locally against an Intuit *sandbox* company, which is a free fake company Intuit provides
-  for exactly this.
-- TypeScript strict mode, no `any`. Comments explain *why* something is done, not what the
-  line does.
-- Tests live in a `__tests__/` folder next to the code they cover.
-
-`context/decisions.md` records why things are built the way they are. Worth skimming
-before you start, and worth adding to when you make a call of your own.
+Setup, the working loop and the repo's conventions are in
+[`ONBOARDING.md`](../../ONBOARDING.md) at the root of this repository. Read that first;
+it is written for exactly this situation.
