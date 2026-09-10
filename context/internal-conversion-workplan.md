@@ -242,6 +242,38 @@ given an injectable clock so its behaviour is exactly testable (the `RateLimiter
 variables first. Boot-time validation exits without them, so the deploy fails its healthcheck —
 safely, since Railway keeps the previous version running, but it fails.
 
+## PR 3a · `fix/revoke-the-right-token` — the hotfix PR 3 needed · **open as [#17](https://github.com/aircfo/qbo-mcp/pull/17), CI green** (2026-09-10)
+
+PR 3's first real use, on production, produced a connection that was already dead: Intuit answered
+`401 AuthenticationFailed, errorCode 3200` seconds after a successful exchange, and the confirmation
+page read `(name unavailable)` because its CompanyInfo lookup was the first call to hit it.
+
+`OAuthClient.revoke(params)` reads `params.access_token || params.refresh_token || <its own current
+token>`. Our wrapper passed `{ token }`, which it ignores, so every revoke fell through to the
+client's own token — and that client is a singleton whose state was last written by `createToken`. A
+re-authorization revoked the access token it had just minted. Full reasoning in `decisions.md`.
+
+Fixed by naming the parameter, removing the revoke from `reconcileConnection` entirely, and guarding
+the cancel path so it only revokes a connection it created. Revocation now works for the first time
+on this server, which also closes the half of G4 that observed old Intuit grants staying live.
+
+**What this says about the verification step.** The deploy was checked from outside and the database
+was read, but nothing asked *Intuit* whether the stored credentials still worked — and the answer
+was sitting in the logs as `company_name_lookup_failed`. Every future connect-flow change gets one
+more check before it is called done:
+
+```sh
+railway logs -n 200 --json -f 'company_name_lookup_failed OR qbo_upstream_error OR access_refused'
+```
+
+and, for a change that touches credentials, a direct call to Intuit with a stored token
+(`context/prod-query.js` is the pattern; print statuses, never tokens).
+
+**Named follow-up, not yet scheduled.** `QboClientManager` refreshes on expiry only, so an access
+token Intuit invalidates early keeps failing for up to an hour instead of triggering one
+refresh-and-retry. It would have softened this incident and would also have hidden the bug. Small,
+self-contained, and worth doing before the September close — fold into PR 6 or take it alone.
+
 ## PR 4 · `chore/teardown` + two sibling PRs — the public surface (P2) · Thu 09-17 → Fri 09-18, parallel to PR 3 · ½ session each
 
 **Closes G15 (visibility) and the plan's §5.**
