@@ -15,6 +15,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthStore } from "./oauth-store.js";
+import { log } from "../log.js";
 import { renderConnectPage } from "./connect-page.js";
 
 /**
@@ -73,6 +74,12 @@ export class QboOAuthProvider implements OAuthServerProvider {
   ): Promise<OAuthTokens> {
     const consumed = this.store.consumeAuthCode(authorizationCode);
     if (!consumed || consumed.clientId !== client.client_id) {
+      // Logged because a rejection here means a connect attempt died at the
+      // last step, which the connect funnel's drop-off cannot otherwise explain.
+      log.warn(
+        { clientId: client.client_id, known: Boolean(consumed) },
+        "auth_code_rejected",
+      );
       throw new InvalidGrantError("Unknown or expired authorization code");
     }
     const tokens = this.store.issueTokens({
@@ -94,6 +101,14 @@ export class QboOAuthProvider implements OAuthServerProvider {
   ): Promise<OAuthTokens> {
     const rotated = this.store.rotateRefresh(refreshToken);
     if (!rotated || rotated.clientId !== client.client_id) {
+      // Refresh is rotate-and-destroy with no reuse window, so two sessions
+      // sharing one stored credential can race and the loser lands here. That
+      // would force a manual reconnect, so it is logged to be counted: if these
+      // lines appear in production, rotation needs a grace window.
+      log.warn(
+        { clientId: client.client_id, known: Boolean(rotated) },
+        "refresh_token_rejected",
+      );
       throw new InvalidGrantError("Unknown or expired refresh token");
     }
     return {

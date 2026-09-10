@@ -55,7 +55,9 @@ fetch it on demand. That keeps the breach blast radius to "tokens" rather than
 - **Unguessable, hashed credentials.** Access/refresh tokens and auth codes are
   256-bit random values, stored only as SHA-256 hashes.
 - **Session binding.** An MCP session may only be driven by the connection that
-  created it; mismatches are rejected (403).
+  created it. A mismatch is answered exactly like an unknown session (404), so a
+  caller cannot use the response to learn that a session id exists under another
+  tenant.
 - **Token-only encryption boundary.** Intuit tokens are encrypted/decrypted at
   the DB layer; raw tokens never touch disk. The encryption key lives in a
   Railway env var, separate from the volume that holds the database.
@@ -83,7 +85,10 @@ fetch it on demand. That keeps the breach blast radius to "tokens" rather than
 - **Per-connection rate limit** on tool calls (120/min) → 429.
 - **Per-IP rate limit** on the public surface (600/min) → 429; `/health` exempt.
 - **Request-size caps** (256kb JSON, 16kb form) to prevent memory-exhaustion.
-- **Idle session eviction** (30 min) so the in-memory session map stays bounded.
+- **Idle session eviction** (8 h) so the in-memory session map stays bounded.
+  An evicted session is answered with 404, the protocol's expired-session
+  signal, so a client re-initialises on its own rather than retrying a dead
+  session until a person intervenes.
 - **Field allowlists** on search tools so only expected fields reach the QBO
   query layer.
 - **Process guards** (unhandledRejection/uncaughtException) + a final error

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Request, RequestHandler, Response } from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { log } from "./log.js";
 import { RateLimiter } from "./rate-limit.js";
 import { createMcpServer } from "./server.js";
@@ -19,10 +20,18 @@ const sessions = new Map<string, Session>();
 // runaway client from hammering QuickBooks (and Intuit's per-app quota).
 const limiter = new RateLimiter(120, 60_000);
 
-// Evict idle sessions so the in-memory map can't grow without bound when
-// clients disconnect without sending DELETE /mcp.
-const SESSION_IDLE_MS = 30 * 60_000;
+/**
+ * How long an idle session is held. Eviction is graceful now (see
+ * `sessionNotFound`), but re-initialising still costs a round trip and resets
+ * the client's tool list, so this is long enough that a close which pauses for
+ * a meeting resumes on the same session.
+ */
+const SESSION_IDLE_MS = 8 * 60 * 60_000;
 const SWEEP_INTERVAL_MS = 5 * 60_000;
+
+// The two JSON-RPC codes the MCP spec (and the SDK) use for session failures.
+const INVALID_REQUEST_CODE = -32000;
+const SESSION_NOT_FOUND_CODE = -32001;
 
 function connectionIdFrom(req: Request): string | undefined {
   const extra = req.auth?.extra as { connectionId?: unknown } | undefined;
@@ -31,11 +40,84 @@ function connectionIdFrom(req: Request): string | undefined {
     : undefined;
 }
 
+function sessionIdFrom(req: Request): string | undefined {
+  const value = req.headers["mcp-session-id"];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
 function toolNameFrom(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const b = body as { method?: unknown; params?: { name?: unknown } };
   if (b.method !== "tools/call") return null;
   return typeof b.params?.name === "string" ? b.params.name : null;
+}
+
+/** True when the body — single or batched — opens a new MCP session. */
+function isInitializing(body: unknown): boolean {
+  return Array.isArray(body)
+    ? body.some(isInitializeRequest)
+    : isInitializeRequest(body);
+}
+
+/** A JSON-RPC error response, so a rejection still parses as a protocol reply. */
+function rpcError(
+  res: Response,
+  status: number,
+  code: number,
+  message: string,
+): void {
+  res.status(status).json({
+    jsonrpc: "2.0",
+    error: { code, message },
+    id: null,
+  });
+}
+
+/**
+ * Answer a request for a session we don't hold with 404 — the spec's
+ * expired-session signal, and the one status that makes a client re-initialise
+ * on its own.
+ *
+ * This is the fix for the defect that made unattended runs impossible. The
+ * server evicts idle sessions, and a request naming an evicted session used to
+ * fall through to a *fresh* transport, whose first act is to reject any
+ * non-initialize request with 400 "Server not initialized". Clients treat that
+ * 400 as a protocol error and retry it verbatim, so a session that died
+ * mid-run never recovered until someone disconnected and re-authenticated by
+ * hand — 31% of production requests were that 400.
+ *
+ * A session owned by another connection answers the same way, so a token for
+ * one connection cannot discover another connection's session ids.
+ */
+function sessionNotFound(
+  req: Request,
+  res: Response,
+  connectionId: string,
+  sessionId: string,
+  ownedByOther: boolean,
+): void {
+  rpcError(res, 404, SESSION_NOT_FOUND_CODE, "Session not found");
+  log.warn(
+    { connectionId, sessionId, ownedByOther, method: req.method },
+    "session_not_found",
+  );
+}
+
+/** One structured line per request, emitted when the response finishes. */
+function logWhenFinished(
+  req: Request,
+  res: Response,
+  connectionId: string,
+): void {
+  const start = process.hrtime.bigint();
+  const tool = toolNameFrom(req.body);
+  res.on("finish", () => {
+    const ms = Math.round(Number(process.hrtime.bigint() - start) / 1e6);
+    log.info(
+      { connectionId, method: req.method, tool, status: res.statusCode, ms },
+      "mcp_request",
+    );
+  });
 }
 
 async function evict(sessionId: string, session: Session): Promise<void> {
@@ -75,33 +157,36 @@ export const handleMcpPost: RequestHandler = async (req, res) => {
     return;
   }
 
-  // One structured line per request, emitted when the response finishes.
-  const start = process.hrtime.bigint();
-  const tool = toolNameFrom(req.body);
-  res.on("finish", () => {
-    const ms = Math.round(Number(process.hrtime.bigint() - start) / 1e6);
-    log.info({ connectionId, tool, status: res.statusCode, ms }, "mcp_request");
-  });
+  logWhenFinished(req, res, connectionId);
 
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  const existing = sessionId ? sessions.get(sessionId) : undefined;
-  if (existing) {
-    // Defense-in-depth for a multi-tenant server: a session must be driven by
-    // the same connection that created it. Session ids are unguessable, but we
-    // never want a token for connection B to operate connection A's session.
-    // Answer 404 (not 403): the spec's expired-session signal makes the client
-    // re-initialize with its own token, and it avoids confirming that the
-    // session id exists under another tenant. A 403 here surfaces to users as
-    // a fatal "blocked by a firewall" permission error after any re-auth or
-    // plugin migration that leaves a live session behind.
-    if (existing.connectionId !== connectionId) {
-      res.status(404).json({ error: "session not found" });
-      log.warn({ connectionId, sessionId }, "session_connection_mismatch");
+  const sessionId = sessionIdFrom(req);
+
+  if (!isInitializing(req.body)) {
+    if (!sessionId) {
+      rpcError(
+        res,
+        400,
+        INVALID_REQUEST_CODE,
+        "Bad Request: Mcp-Session-Id header is required",
+      );
       return;
     }
-    existing.lastActive = Date.now();
-    await existing.transport.handleRequest(req, res, req.body);
+    const session = sessions.get(sessionId);
+    if (!session || session.connectionId !== connectionId) {
+      sessionNotFound(req, res, connectionId, sessionId, Boolean(session));
+      return;
+    }
+    session.lastActive = Date.now();
+    await session.transport.handleRequest(req, res, req.body);
     return;
+  }
+
+  // An initialize always starts a fresh session, even when the client sends a
+  // stale session id alongside it. Retire whatever session it named so a client
+  // that reconnects repeatedly doesn't leave one behind on every attempt.
+  if (sessionId) {
+    const stale = sessions.get(sessionId);
+    if (stale?.connectionId === connectionId) await evict(sessionId, stale);
   }
 
   const server = createMcpServer(connectionId);
@@ -145,19 +230,29 @@ async function withSession(
   res: Response,
   fn: (session: Session, sessionId: string) => void | Promise<void>,
 ): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  const session = sessionId ? sessions.get(sessionId) : undefined;
-  if (!sessionId || !session) {
-    res.status(400).json({ error: "invalid or missing session id" });
+  const connectionId = connectionIdFrom(req);
+  if (!connectionId) {
+    res
+      .status(401)
+      .json({ error: "no QuickBooks connection bound to this token" });
     return;
   }
-  // Same ownership guard (and same 404-over-403 reasoning) as handleMcpPost.
-  if (session.connectionId !== connectionIdFrom(req)) {
-    res.status(404).json({ error: "session not found" });
-    log.warn(
-      { connectionId: connectionIdFrom(req), sessionId },
-      "session_connection_mismatch",
+
+  logWhenFinished(req, res, connectionId);
+
+  const sessionId = sessionIdFrom(req);
+  if (!sessionId) {
+    rpcError(
+      res,
+      400,
+      INVALID_REQUEST_CODE,
+      "Bad Request: Mcp-Session-Id header is required",
     );
+    return;
+  }
+  const session = sessions.get(sessionId);
+  if (!session || session.connectionId !== connectionId) {
+    sessionNotFound(req, res, connectionId, sessionId, Boolean(session));
     return;
   }
   session.lastActive = Date.now();

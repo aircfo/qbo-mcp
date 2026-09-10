@@ -197,3 +197,39 @@ Preparing for external consumption (pushing non-airCFO users toward the tool):
 - **Bare server root now redirects to the user guide** (`DOCS_URL` env, defaults
   to the Pages URL) so pasting the connector URL into a browser lands somewhere
   legit instead of a 404.
+
+## 2026-09-10 — qbo-mcp becomes airCFO's internal ledger connector (Alex)
+
+The server was built and hardened as a public, read-only tool for outside founders. It is now
+the QuickBooks connector for airCFO's bookkeeping automation (`~/GitHub/bookkeeping-automation`),
+which needs writes by the 2026-10-02 mapping day. Production evidence read the same day: 37
+connections since May, 9 people, 8 on @aircfo.com; teammates already connect client companies.
+
+**Decision (seven rulings, all confirmed):**
+
+1. **Internal-only.** Repo private, GitHub Pages down, the public plugin stops pointing at this
+   deployment, outsider-facing connect-page promises removed.
+2. **Identity is Google sign-in on @aircfo.com with an allowlist**, the `aircfo-mcp` pattern.
+   The self-reported email goes away; the allowlist is re-checked on every request.
+3. **Write scope v1 is two tools:** re-categorize existing Purchase/Deposit transactions and
+   create journal entries. Dry-run by default; commit requires an approval token minted from the
+   exact approved batch; every write logged with its verified approver; entity allowlist in code;
+   nothing that creates, pays or moves cash.
+4. **Commit mode waits for verified identity** — the Google gate ships before writes. If the
+   gate slips, writes ship dry-run-only and Kim posts from the worksheet on 10-02.
+5. **Per-person Intuit grants stay**; no shared team token per realm.
+6. **Same repo, same deployment URL, through October.** The Noctopus question is decided in Q4,
+   after client #2. Grants and every client folder are keyed by the URL.
+7. **The one non-airCFO address in production** (a Gmail user of one client company since June)
+   is identified by Alex; if unknown by 2026-09-16 it gets a one-line notice before the gate
+   closes.
+
+**Why not keep it public:** no outside demand appeared in three months (zero beta requests, one
+webinar follow-up), while the internal use grew to nine people and six client companies, and the
+public design (unverified email, open registration, read-only) blocks the write path the close
+needs. Reversibility: the server keeps running throughout; only who may sign in changes.
+
+Proposal and evidence: `context/internal-conversion-plan.md`. Execution:
+`context/internal-conversion-workplan.md`. Root cause of the hourly re-auth defect (key question
+#52 in bookkeeping-automation): evicted sessions were answered 400 instead of 404, so clients
+never re-initialized — measured at 31% of production requests.

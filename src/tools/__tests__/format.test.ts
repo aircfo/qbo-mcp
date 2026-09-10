@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  TimeoutError,
   definedOnly,
   flattenReport,
   json,
   promisify,
+  qboErrorMessage,
+  qboStatus,
+  requireBothDates,
   shapeReport,
   toolError,
+  withTimeout,
 } from "../_format.js";
 
 // A General Ledger-shaped report: account sections, each with leaf transaction
@@ -292,5 +297,138 @@ describe("shapeReport", () => {
     expect(shapeReport(glReport, { maxRows: 100 })).not.toHaveProperty(
       "truncated",
     );
+  });
+});
+
+describe("withTimeout", () => {
+  it("passes a result through when the call finishes in time", async () => {
+    await expect(withTimeout(async () => "ok", 1_000, "call")).resolves.toBe(
+      "ok",
+    );
+  });
+
+  it("rejects with a TimeoutError once the deadline passes", async () => {
+    const never = () => new Promise<string>(() => {});
+    await expect(withTimeout(never, 10, "QuickBooks request")).rejects.toThrow(
+      TimeoutError,
+    );
+  });
+
+  it("names the call and its deadline in seconds", () => {
+    // Constructed directly: the production deadline is 45s and no test should
+    // wait for it.
+    expect(new TimeoutError(45_000, "QuickBooks request").message).toBe(
+      "QuickBooks request timed out after 45s",
+    );
+  });
+
+  it("passes the original failure through untouched", async () => {
+    const boom = () => Promise.reject(new Error("upstream said no"));
+    await expect(withTimeout(boom, 1_000, "call")).rejects.toThrow(
+      "upstream said no",
+    );
+  });
+});
+
+describe("qboStatus / qboErrorMessage", () => {
+  // A 2xx whose body carries a Fault: node-quickbooks hands the body back as
+  // the error, so there is no `response` to read a status from.
+  const faultBody = {
+    Fault: {
+      Error: [
+        {
+          Message: "Invalid query",
+          Detail:
+            "QueryValidationError: value for Account.AccountType is not valid",
+          code: "4000",
+        },
+      ],
+      type: "ValidationFault",
+    },
+  };
+
+  /**
+   * A rejected request, the shape Axios throws: a real Error carrying the
+   * response, whose body may itself hold the Fault.
+   */
+  function axiosError(status: number, data: unknown): Error {
+    return Object.assign(
+      new Error(`Request failed with status code ${status}`),
+      {
+        response: { status, data },
+      },
+    );
+  }
+
+  const axiosFault = axiosError(400, faultBody);
+
+  it("reads the status from a rejected request and nothing from a fault body", () => {
+    expect(qboStatus(axiosFault)).toBe(400);
+    expect(qboStatus(faultBody)).toBeUndefined();
+    expect(qboStatus(new Error("nope"))).toBeUndefined();
+  });
+
+  it("reports Intuit's message, detail and code from a fault body", () => {
+    const message = qboErrorMessage(faultBody);
+    expect(message).toContain("Invalid query");
+    expect(message).toContain("Account.AccountType is not valid");
+    expect(message).toContain("QBO 4000");
+  });
+
+  it("finds the fault inside a rejected request and adds the status", () => {
+    const message = qboErrorMessage(axiosFault);
+    expect(message).toContain("Invalid query");
+    expect(message).toContain("QBO 4000");
+    expect(message).toContain("HTTP 400");
+  });
+
+  it("falls back to the status when a gateway answers with no fault", () => {
+    const gateway = axiosError(504, "<html>gateway timeout</html>");
+    expect(qboErrorMessage(gateway)).toBe(
+      "Request failed with status code 504 [HTTP 504]",
+    );
+  });
+
+  it("names the status even when the failure is not an Error", () => {
+    expect(qboErrorMessage({ response: { status: 503 } })).toBe(
+      "QuickBooks returned HTTP 503.",
+    );
+  });
+
+  it("truncates a detail long enough to carry a whole query", () => {
+    const long = {
+      Fault: { Error: [{ Message: "Invalid query", Detail: "x".repeat(900) }] },
+    };
+    expect(qboErrorMessage(long).length).toBeLessThan(400);
+    expect(qboErrorMessage(long)).toContain("…");
+  });
+
+  it("reports a plain error's own message", () => {
+    expect(qboErrorMessage(new Error("socket hang up"))).toBe("socket hang up");
+  });
+});
+
+describe("requireBothDates", () => {
+  it("accepts both dates and accepts neither", () => {
+    expect(
+      requireBothDates({ start_date: "2026-08-01", end_date: "2026-08-31" }),
+    ).toBeNull();
+    expect(requireBothDates({ accounting_method: "Accrual" })).toBeNull();
+  });
+
+  it("rejects a lone end_date and names the missing one", () => {
+    const result = requireBothDates({ end_date: "2026-08-31" });
+    expect(result?.isError).toBe(true);
+    expect(String(result?.content?.[0]?.text)).toContain("add start_date");
+  });
+
+  it("rejects a lone start_date and names the missing one", () => {
+    const result = requireBothDates({ start_date: "2026-08-01" });
+    expect(result?.isError).toBe(true);
+    expect(String(result?.content?.[0]?.text)).toContain("add end_date");
+  });
+
+  it("treats an empty string as absent", () => {
+    expect(requireBothDates({ start_date: "", end_date: "" })).toBeNull();
   });
 });
