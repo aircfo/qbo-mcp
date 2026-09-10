@@ -1,0 +1,190 @@
+# Workplan — qbo-mcp internal conversion
+
+**Ruled:** 2026-09-10 (Alex; the seven rulings in `internal-conversion-plan.md` §2, logged in
+`decisions.md`) · **Governs:** 2026-09-11 → 2026-10-02, then October · **Shape:** one pull request
+per row, in order; each names its files, its tests, and what "done" means. Gap ids (G1…G16) and
+phases (P0…P5) are the plan's.
+
+**Who.** Alex drives the Claude Code sessions and owns the Railway and Google Cloud settings. Kevin
+verifies each PR on his read-only runs from `bookkeeping-automation/clients/aircfo/`. PR 3 (identity)
+and PR 5 (writes) deserve a second pair of eyes from Engineering before merge; they are the two that
+change who can do what to a client's books.
+
+**How every PR runs.** Node 22 locally (`nvm use 22` or mise; Node 26 breaks the SQLite tests),
+`pnpm install`, `pnpm typecheck && pnpm test`, feature branch `feat/…` or `fix/…`, conventional
+commits, PR against `main`, CI green (PR 1 adds CI), merge. Merging to `main` **is** the production
+deploy (Railway auto-deploys). Verify each deploy with `railway logs` before calling the row done.
+
+## P0 · Before the code (Fri 09-11 → Mon 09-14)
+
+| # | Item | Owner | Done when |
+|---|---|---|---|
+| 0.1 | Rulings logged in `context/decisions.md` | Claude | done 2026-09-10 |
+| 0.2 | **Identify `aarondras@gmail.com`** (realm 719325880, five connections since June, active 09-10). Teammate on a personal account → allowlist or ask for an @aircfo.com login. Client contact → decide with the AM. Unknown by Wed 09-16 → one-line note that the hosted connector is now internal, sent before PR 3 deploys | Alex | name known, or the note sent |
+| 0.3 | **Google OAuth client for qbo-mcp**, in the same Google Cloud project as `aircfo-mcp`: type Web application; authorized redirect URIs `https://qbo-mcp-production-5667.up.railway.app/oauth/google/callback` and the sandbox project's equivalent; user type Internal (Workspace). Put `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` into **both** Railway projects' variables now so PR 3 is not blocked on it | Alex, ~10 min | both projects show the two variables |
+| 0.4 | Draft `ALLOWED_USERS` for Railway: everyone who appears in the production table plus the team who will run closes (alex, david, johannes, kevin, kettia, romicca, aivic, grace.cuya, carlos.damico; add Kim and Justin McLoughlin). `ADMIN_USERS`: alex | Alex | variable set on both projects (comma-separated, lowercase) |
+| 0.5 | Tell the team (Slack): PR 1 ends the "reconnect doesn't work" defect this week; PR 3 will force **one** re-authorization of every QuickBooks connector the day it ships, announced 24 h ahead | Alex | posted |
+| 0.6 | Kevin: note the date and time of any "server needs authentication" event from 09-14 on, so PR 1's effect is measurable from his side too | Kevin | log kept in the categorize packet's *Steps observed* |
+
+## PR 1 · `fix/session-404-timeouts-ci` — unattended reads (P1) · Mon 09-14 → Tue 09-15 · 1 session
+
+**Closes G1, G2, G14, G16.** The two-line fix that ends the hourly re-auth, plus the guards that
+make a failed QuickBooks call say why.
+
+| File | Change |
+|---|---|
+| `src/transport.ts` | `handleMcpPost`: when `mcp-session-id` is present and the map has no such session, answer **404** with the JSON-RPC body `{ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null }` and log `session_not_found`; only build a new transport when the header is absent (an `initialize`). `withSession` (GET, DELETE): unknown or missing session → the same 404 (was 400). `SESSION_IDLE_MS` 30 min → 8 h. Add `email` to the `mcp_request` line once PR 3 supplies it |
+| `src/tools/_format.ts` | `withTimeout(promise, ms, label)`; `qboErrorMessage(err)` — pulls `Fault.Error[0].Message` / `Detail` / `code` and the HTTP status out of a node-quickbooks error into one sentence |
+| `src/tools/_shared.ts` | `runQbo`: wrap the call in `withTimeout(60_000)`; on HTTP 429 / 500 / 502 / 503 / 504 retry once after 1 s, once more after 3 s; tool errors use `qboErrorMessage`; log `qbo_upstream_error` with status, code and ms |
+| `src/auth/provider.ts` | log `refresh_token_rejected` (with client id) when `exchangeRefreshToken` fails and `auth_code_rejected` when the code exchange fails — this is what makes the secondary refresh-race hypothesis measurable |
+| `src/tools/reports.ts` | `account_type` becomes `z.enum` of the fifteen QBO values (CamelCase); a `requireBothDates(args)` guard on every report that takes `start_date` / `end_date` returns a tool error naming both when only one is passed |
+| `vitest.config.ts`, `src/__tests__/setup-env.ts` | Test env: `TOKEN_ENCRYPTION_KEY` (random 32 bytes), dummy `INTUIT_*`, `PUBLIC_URL`, `DATABASE_PATH=":memory:"` — so modules that import `deps.js` load under vitest |
+| `src/__tests__/transport.test.ts` | Express app on port 0 with a stub middleware setting `req.auth.extra.connectionId`: `initialize` without a header → 200 and an `mcp-session-id`; POST with an unknown id → 404, code −32001; GET and DELETE with an unknown id → 404; known id, other connection → 404; known id, same connection → 200 |
+| `src/tools/__tests__/format.test.ts` | `qboErrorMessage` on a real Fault shape and on a plain Error; `withTimeout` rejects after the deadline and passes a fast result through |
+| `src/tools/__tests__/reports-params.test.ts` | the date guard and the `account_type` enum (pure helpers) |
+| `.github/workflows/ci.yml` | on pull request and push to `main`: Node 22, `corepack enable`, `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`. Alex: branch protection on `main` requiring the check |
+
+**Done when:** CI green and merged; over the next 48 h `railway logs -n 5000 --json -f mcp_request`
+shows the 400 share falling from 31% toward zero and `session_not_found` lines appearing in their
+place; Kevin leaves a session idle for more than 30 minutes and the next tool call succeeds without
+`/mcp`; a deliberately slow call (or the next Intuit slowness) returns a tool error within 60 s
+naming the fault instead of a 504 from the edge.
+
+## PR 2 · `feat/connection-identity-tools` — realm, status, no orphans (P1) · Tue 09-15 → Wed 09-16 · ½–1 session
+
+**Closes G3, G4, G10 (description), G15 (company name).**
+
+| File | Change |
+|---|---|
+| `src/tools/company.ts` | `get_company_info` returns `{ realmId, environment, connection: { authorizedBy, connectedAt, lastRefreshAt }, company }` where `company` is the QBO CompanyInfo as before. New tool `connection_status` (no QuickBooks call): realm, environment, authorized by, connected at, last refresh, `writesEnabled` (false until PR 5) |
+| `src/store/connection-store.ts` | `findByRealmAndEmail(realmId, email)`, `setCompanyName(id, name)`; `updateTokens` already exists |
+| `src/auth/connection-reconcile.ts` (new, pure with injected stores) | given the Intuit token set and the pending auth: if a row exists for (realm, email) → best-effort revoke the **old** Intuit refresh token at Intuit, `updateTokens` on the existing row and **reuse its id** (other Claude Code sessions holding that connection keep working); else `create`. Then fetch CompanyInfo once and store `company_name` |
+| `src/auth/intuit-callback.ts` | calls `reconcileConnection` instead of `create` |
+| `src/tools/reports.ts` | `get_transaction_list` description says plainly that `cleared: "Uncleared"` with an `account` filter is the uncleared-items list (G10) |
+| tests | `connection-store.test.ts`: `findByRealmAndEmail`, `setCompanyName`. `connection-reconcile.test.ts`: new realm → create; same realm and email → update in place, old token revoked, id unchanged; revoke failure logged and not fatal |
+
+**Done when:** `get_company_info` on the airCFO connection returns realm `793988035`; a second
+authorization by the same person for the same company does not add a row to `connections`
+(check with `context/prod-query.js`); Kevin's registry PR (see PR 4) switches the identity check to
+compare the realm.
+
+## PR 3 · `feat/google-identity` — who is calling (P2) · Wed 09-16 → Mon 09-21 · 1–2 sessions · Engineering review
+
+**Closes G5, G7; removes the public connect page.** Copies `aircfo-mcp`'s gate: `src/auth/google-idp.ts`
+(`googleAuthUrl`, `verifyGoogleCode` on `google-auth-library`'s `OAuth2Client`, scopes
+`openid email profile`, verified `id_token` is the source of truth) and its per-request allowlist
+re-check.
+
+| File | Change |
+|---|---|
+| `package.json` | add `google-auth-library` |
+| `src/config/env.ts` | add `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` (required), `ALLOWED_USERS` (comma list → lowercase array), `ALLOWED_DOMAIN` (default `aircfo.com`), `ADMIN_USERS`. Remove `TERMS_URL`, `PRIVACY_URL`, `DOCS_URL`, and the dead `JWT_SIGNING_KEY` from `.env` |
+| `src/auth/google-idp.ts` (new) | as in `aircfo-mcp`; redirect URI `${PUBLIC_URL}/oauth/google/callback` |
+| `src/auth/access.ts` (new) | `isAllowedUser(email)` = verified, ends with `@ALLOWED_DOMAIN`, in `ALLOWED_USERS`; `isAdmin(email)` |
+| `src/auth/provider.ts` | `authorize()` stores the pending auth (client, redirect, PKCE, MCP state) and redirects to Google with the state. `verifyAccessToken()` loads the connection, requires `authorized_by` non-null **and** `isAllowedUser(authorized_by)` — so legacy rows re-authenticate once and a de-listed person is cut off on their next call; `extra` carries `{ connectionId, email }` |
+| `src/auth/google-callback.ts` (new) | `GET /oauth/google/callback`: verify the code → gate → on refusal a plain page "not on the allowlist — ask Alex" and a `login_denied` log line; on success attach the verified email to the pending auth and redirect to Intuit |
+| `src/auth/intuit-callback.ts` | after `reconcileConnection` (PR 2) with `authorized_by` = the verified email, render the **confirmation page** (G5): company name, realm, environment, "connecting as you@aircfo.com", **Continue** / **Wrong company**. Store a `pending_confirm` row (10 min) carrying connection id, client, redirect, PKCE |
+| `src/auth/connect-confirm.ts` (new) | `POST /connect/confirm` → consume `pending_confirm` → issue the auth code → existing success page → redirect to the client. `POST /connect/cancel` → revoke the Intuit token, delete the row if it was created in this flow, "Nothing was connected" page |
+| `src/auth/connect-page.ts`, `src/auth/connect-start.ts` | deleted |
+| `src/store/db.ts` | `ensureColumn(connections, "authorized_by", "TEXT")`, `ensureColumn(connections, "writes_enabled", "INTEGER NOT NULL DEFAULT 0")`; the session reaper also deletes `oauth_tokens` rows expired more than 7 days (G15) |
+| `src/tools/admin.ts` (new) | registered only when the session's email `isAdmin`: `list_connections` (id, realm, company, authorized by, connected, last refresh, writes enabled), `revoke_connection(id)` (Intuit revoke, MCP tokens revoked, row deleted), `set_writes_enabled(id, enabled)` |
+| `src/transport.ts` | `email` on every `mcp_request` line |
+| `src/index.ts` | routes: drop `/connect/start`; add `/oauth/google/callback`, `/connect/confirm`, `/connect/cancel`; `/` returns a one-line "airCFO QBO Gateway — internal" page; `resourceName` stays "airCFO QBO Gateway" |
+| tests | `access.test.ts` (domain, allowlist, case, unverified email refused); `google-callback` gate with an injected verifier; `pending_confirm` issue/consume/expiry in `oauth-store.test.ts`; `provider.test.ts`: `verifyAccessToken` refuses a legacy row (no `authorized_by`) and a de-listed email; `admin` tools registered for an admin session only |
+
+**Deploy order.** Sandbox project first with the real Google client and a two-person allowlist;
+confirm a non-listed Google account is refused and the confirmation page shows the sandbox company.
+Then production on a **Monday morning** (09-21) after the 24 h notice: every teammate re-runs `/mcp`
+once per client folder and the claude.ai connector once. Watch `login_denied` for the first day.
+
+**Done when:** a Google account outside the allowlist cannot connect; `connection_status` shows the
+teammate's verified email; removing an email from `ALLOWED_USERS` blocks that person's next call
+without a redeploy of anything else; `list_connections` shows every row with a company name; the
+Gmail user is either allowlisted or refused, per 0.2.
+
+## PR 4 · `chore/teardown` + two sibling PRs — the public surface (P2) · Thu 09-17 → Fri 09-18, parallel to PR 3 · ½ session each
+
+**Closes G15 (visibility) and the plan's §5.**
+
+| Where | Change |
+|---|---|
+| GitHub settings (Alex) | `gh repo edit aircfo/qbo-mcp --visibility private --accept-visibility-change-consequences`; disable Pages (`gh api -X DELETE repos/aircfo/qbo-mcp/pages`) |
+| `docs/` | delete the Jekyll site. The getting-started content that still applies to teammates moves into `README.md` |
+| `README.md` | rewrite for the internal posture: what it is, who may use it (allowlist), how to connect from a client folder, the identity check with the realm, the read tools, the write tools and their approval flow (PR 5), the admin tools, operations. Keep the Intuit OSS attribution and `LICENSE` |
+| `SECURITY.md` | rewrite: team identity, write controls, the audit table, what the tool can do to a client's books and who can do it, incident response (rotate `TOKEN_ENCRYPTION_KEY`, revoke, notify). Drop the "going public" checklist and the `docs/security-details.md` sync note |
+| `DEPLOY.md` | the Google client setup, the new variables, and a **Sandbox** section: the "QBO MCP (Sandbox)" Railway project is this same code with `INTUIT_ENVIRONMENT=sandbox`, used to develop and prove writes |
+| `context/intuit-launch-requirements.md` | one line at the top: superseded by the internal decision; kept for the pricing facts |
+| `aircfo/claude-startup-finance` (sibling PR) | remove the hosted URL from `plugins/finance-contextos/.mcp.json`; README rows 64 and 157 become "self-host qbo-mcp and point the plugin at your deployment"; `CHANGELOG`; version 0.9.1. The context-builder skill already degrades without the connector |
+| `bookkeeping-automation` (sibling PR) | `connectors/registry.json` qbo: `identityCheck` compares `realmId` from `get_company_info` to the client README; `authRunbook` gains the Google sign-in step and drops the #52 defect note once PR 1 is verified; `playbooks/00-operator-setup.md` and `01-scaffold-and-connect.md` the same; key question #52 → `answered` with the date and the cause |
+
+**Done when:** `gh repo view` says private; the Pages URL returns 404; the plugin's connector file no
+longer names our deployment; the registry and playbooks describe the new flow.
+
+## PR 5 · `feat/writes` — categorize and post, approved (P3) · Mon 09-21 → Fri 09-25 · 2–3 sessions · Engineering review
+
+**Closes G6.** Built and proven on the Sandbox project first. Plan §4 is the design; this is the
+file list.
+
+| File | Change |
+|---|---|
+| `src/store/db.ts` | table `write_audit` (id, connection_id, realm_id, approver_email, tool, mode, batch_key, payload_hash, item_count, items JSON, status, error, started_at, finished_at); unique index on (connection_id, batch_key) where `batch_key` is not null; `oauth_tokens` kind `approval` for single-use approval tokens |
+| `src/config/env.ts` | `WRITES_ENABLED` (boolean, default false). The approval-token key is derived from `TOKEN_ENCRYPTION_KEY` with HKDF; no new secret |
+| `src/tools/_writes.ts` (new, pure) | `canonicalize(batch)` (stable key order, trimmed strings, cents as integers); `mintApproval({ connectionId, email, payloadHash })` HMAC-SHA256, 30-minute expiry, single use; `verifyApproval`; `assertBalanced(entry)` to the cent; `ALLOWED_TXN_TYPES = ["Purchase", "Deposit"]`; `isFundingLine(txn, line)` (the bank or card side is never editable); `applyCategory(txn, line_id, account_id, class_id, department_id, memo)` returns the **full** line array with the one change — a QBO sparse update replaces `Line` wholesale, so every line is sent |
+| `src/tools/writes.ts` (new) | `categorize_transactions`: per item `getPurchase` / `getDeposit` → locate the line → refuse funding lines → build `{ Id, SyncToken, sparse: true, Line }` → `updatePurchase` / `updateDeposit`. `create_journal_entries`: `createJournalEntry` with `JournalEntryLineDetail` (`PostingType`, `AccountRef`, `ClassRef`, `DepartmentRef`), `DocNumber`, `PrivateNote`, `TxnDate`. Both: `mode` `dry_run` (default) resolves ids to names via `getAccount` / `findClasses`, returns before → after per item, totals, and the approval token; `commit` verifies the token against the re-canonicalized payload, connection and email, honors `batch_key` idempotency, writes the audit row, executes sequentially, records QBO id and SyncToken before and after per item, and finishes the row. `get_write_log(since, tool?, limit)`. A separate `RateLimiter(30, 60_000)`; 200 items per batch |
+| `src/server.ts` | write tools registered only when `env.WRITES_ENABLED` **and** the connection's `writes_enabled` **and** `authorized_by` is set |
+| `DEPLOY.md` | how to enable writes on one connection (`set_writes_enabled`) and how to turn them all off (`WRITES_ENABLED=false`) |
+| tests | `_writes.test.ts`: canonical form stable across key order and whitespace; token bound to connection, email and hash, expires, single-use; unbalanced entry refused; `Payment` / `Transfer` / `BillPayment` refused by type; funding line refused; the sparse payload carries every line. `writes.test.ts` with a fake `qb`: read-modify-write sends the SyncToken; a SyncToken conflict fails that item and the batch continues; a replayed `batch_key` returns the stored result and posts nothing; dry-run writes an audit row too |
+
+**Sandbox proof (Wed 09-23 → Thu 09-24).** Sandbox project: `WRITES_ENABLED=true`, Google
+variables, `set_writes_enabled` on the sandbox company. Categorize three Purchases and one Deposit
+dry-run → commit; create two journal entries; check each in the sandbox UI; read them back with
+`get_write_log`.
+
+**Production (Fri 09-25 → Wed 09-30).** Deploy with `WRITES_ENABLED=true` and `writes_enabled = 0`
+on every connection; Alex enables it on the airCFO connections only. Dress rehearsal 09-28 → 09-30
+is **dry-run only** on airCFO: Kim's August worksheet through `categorize_transactions`, Kevin's
+prepaid draft through `create_journal_entries`; Kim reads the before → after output once. Commit
+mode on real books only after the written go / no-go on Wed 09-30.
+
+**Done when:** both tools commit on the sandbox with complete audit rows; every guardrail has a
+failing test that its code makes pass; the airCFO dry-run output exists in `closes/2026-09/` for
+Kim; `DEPLOY.md` documents the sandbox and the switches.
+
+## Go / no-go · Wed 09-30
+
+Alex's written call, with Kevin and Justin, per the September plan: which skills run live on 10-02,
+**whether write scope is live**, what is measured. Inputs from this workplan: PR 1's 48-hour log
+check, PR 3's `login_denied` count, PR 5's sandbox proof and the dress-rehearsal dry-run.
+
+## PR 6 · `feat/read-gaps` (P4) · October, after the close · 1–2 sessions
+
+G8 attachments (`findAttachables` filtered on `AttachableRef.EntityRef`, `getAttachable` with the
+temporary download link); G9 recurring templates — not in `node-quickbooks`, so a direct
+`GET /v3/company/{realm}/query?query=select * from RecurringTransaction` with the connection's
+bearer, verified on the sandbox first; G10 `get_uncleared_transactions(account, as_of)`; G11
+`get_uncategorized_activity` over 69999 / 13500 / 49000; G12 `all: true` paging on `search_*` up to
+5,000; G13 `format: "csv"` on detail reports.
+
+## P5 · Q4
+
+The Noctopus decision (plan §7); `rippling-mcp` inherits `google-idp.ts`, `access.ts` and the
+write-audit pattern; `~/GitHub/MCP_CONSOLIDATION_PLAN.md` row for `qbo-mcp` changes from "Public
+(planned)" to "Internal".
+
+## Dependencies and fallbacks
+
+```
+P0 ──► PR 1 ──► PR 2 ──► PR 3 ──► PR 5 ──► go/no-go ──► 10-02
+                          │
+                          └──► PR 4 (parallel; the plugin and registry PRs can land any time after PR 3's design is fixed)
+```
+
+- **PR 1 does not end the re-auths** (48-hour check still shows streaks): read `refresh_token_rejected`
+  in the logs; if present, a small follow-up PR makes refresh rotation idempotent with a 10-minute
+  grace window. Both hypotheses are then measured, not argued.
+- **The Google client is not ready** (0.3 slips): PR 1 and PR 2 ship regardless; PR 3 waits; PR 5's
+  commit mode is blocked by ruling 4, dry-run is not.
+- **PR 5 slips past 09-30:** 10-02 runs dry-run only and Kim posts from the worksheet — the September
+  plan's stated fallback. Order of what gives, unchanged: writes first, read gaps second, PR 1 never.
+- **Re-auth day goes badly:** the confirmation page and `login_denied` lines say why; the allowlist is
+  an env var, fixed in Railway without a deploy.
