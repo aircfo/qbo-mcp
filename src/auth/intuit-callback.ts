@@ -102,16 +102,8 @@ export const intuitCallbackHandler: RequestHandler = async (req, res) => {
       return;
     }
 
-    const { connectionId, reused } = await reconcileConnection(
-      {
-        connections: connectionStore,
-        revokeIntuitToken: (token) => intuitOAuth.revoke(token),
-        onRevokeFailed: (err, id) =>
-          log.warn(
-            { connectionId: id, err: String(err) },
-            "intuit_revoke_failed",
-          ),
-      },
+    const { connectionId, reused } = reconcileConnection(
+      { connections: connectionStore },
       {
         realmId: tokens.realmId,
         email: pending.email,
