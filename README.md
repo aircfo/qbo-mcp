@@ -121,6 +121,8 @@ deletes the stored tokens, and ends access (re-authorize to reconnect).
 | `ALLOWED_DOMAIN` | Workspace domain a signed-in address must belong to (default `aircfo.com`) |
 | `ALLOWED_USERS` | `*` for any verified address on that domain, or a comma-separated list. **Empty admits nobody** |
 | `ADMIN_USERS` | Comma-separated addresses that additionally get the administrative tools |
+| `SERVICE_TOKEN` | Optional. A long shared secret that lets a scheduled job call the read-only `/api` endpoints. **Unset means the `/api` routes are not mounted at all** |
+| `SERVICE_PRINCIPAL_ID` | Names that caller in the logs (default `svc:actuals-pipeline`) |
 
 Copy these into a local `.env` (see the table above) before running. For local
 work, point `PUBLIC_URL` at `http://localhost:8080`, set

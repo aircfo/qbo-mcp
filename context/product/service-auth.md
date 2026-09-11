@@ -1,6 +1,7 @@
 # Service-principal access — step 1 of the scheduled-pull work
 
-**Written:** 2026-09-10 · **State:** spec, ready to build · **Parent:**
+**Written:** 2026-09-10 · **State:** built — see `src/api/`, and the decision logged
+the same day in [`../decisions.md`](../decisions.md) · **Parent:**
 [`qbo-actuals-pipeline.md`](qbo-actuals-pipeline.md)
 
 Today the server can only be reached by a person in a Claude session: every request to
