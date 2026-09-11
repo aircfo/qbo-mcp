@@ -1,7 +1,8 @@
 # Scheduled QuickBooks pulls
 
-**Written:** 2026-09-10 · **For:** Johannes · **State:** proposal, awaiting his read;
-becomes a `decisions.md` entry once agreed
+**Written:** 2026-09-10 · **State:** proposal, for review; becomes a `decisions.md`
+entry once agreed · **Context:** prompted by Johannes's *QBO Owned-Token Pipeline
+(Phase 2)* write-up, Notion, 2026-08-31
 
 ## What the QBO server is
 
@@ -24,8 +25,8 @@ balance. **This works today.** It is how the close work runs.
 clients and land the numbers where the model expects them, with nobody in the loop.
 **This does not exist.** The server only answers when something asks it, and today the
 only thing that asks is a person in a Claude session. There is no scheduler and no way to
-say "pull August for these twelve clients at 6am on the fourth." **This is the piece you
-are building**, and it is the reason the proposal is worth doing.
+say "pull August for these twelve clients at 6am on the fourth." **This is the gap the
+rest of this document proposes closing.**
 
 **3. Let one person move quickly between clients.** A connection binds to one QuickBooks
 company, chosen at Intuit's approval screen. That binding is what keeps clients isolated —
@@ -39,19 +40,13 @@ yet, because claude.ai will not accept the same server twice under two names. Tw
 approaches are being evaluated and are written up in
 [`multi-client-access.md`](multi-client-access.md).
 
-**Your pipeline is not affected by any of that.** A scheduled job identifies a client by
-its realm id — QuickBooks' own id for a company — so switching clients is a value in a
-request rather than a reconnection. You do not need to wait for the third problem to be
-settled.
+## The proposed shape
 
-## What this means for the build
+The hardest and riskiest half of a scheduled-pull system — storing client credentials,
+renewing them before they expire, handling two jobs trying to renew at once, and cutting a
+client off — **already exists in the server.** It should not be built a second time.
 
-The half of your proposal that was going to be hardest and riskiest — storing client
-credentials, renewing them, handling the case where two jobs try to renew at once, and
-cutting a client off — **already exists in the server.** You do not have to write it, and
-we should not write it twice.
-
-There is a good reason not to write it twice beyond the effort saved. Intuit does not
+There is a reason beyond the effort saved. Intuit does not
 offer a read-only connection: the same credential that reads a client's books can also
 change them. Two separate places holding credentials like that means two places to
 protect, two ways to be breached, and two things to fix when Intuit changes something. One
@@ -62,16 +57,17 @@ So the shape is:
 - **The server** keeps every client credential, and grows one small addition: a private
   door that a scheduled job can knock on to ask for a report, without being a person in a
   Claude session.
-- **Your pipeline** is a separate service that you own. It knows the schedule, which
-  clients to pull, and where the numbers go. It asks the server for the reports and never
-  touches a credential.
+- **The pipeline** is a separate service. It knows the schedule, which clients to pull,
+  and where the numbers go. It asks the server for the reports and never touches a
+  credential.
 
-That makes your build a schedule, a transform and a write — a thin layer beside what is
-already there, rather than a second platform.
+That makes the pipeline a schedule, a transform and a write, rather than a second
+platform. It also sidesteps the third problem above: a scheduled job names a client by its
+realm id — QuickBooks' own id for a company — so it never has to switch anything.
 
-Three smaller improvements from your review are going into the server at the same time:
-making credential renewal safe against a crash mid-renewal, keeping a client's connection
-alive when nobody has pulled their books for a quarter, and alerting when a renewal fails.
+Three smaller improvements to the server go in at the same time: making credential renewal
+safe against a crash mid-renewal, keeping a connection alive when nobody has pulled a
+client's books for a quarter, and alerting when a renewal fails.
 
 ---
 
@@ -138,15 +134,15 @@ books is ever added to it, whatever the server's Claude tools grow later.
 
 ## Piece 2 — the pipeline
 
-Yours, as its own service.
+A separate service, running on its own schedule.
 
 **Each month it** reads its own list of which client maps to which realm id and which
 destination grid, asks the server for that client's reports, writes the values into the
 landing grid, and raises an alert on anything that failed.
 
 **It never** holds a QuickBooks credential, runs an approval flow, renews anything, or
-disconnects anything. All of that stays with the server. That removes the most dangerous
-third of the original design, along with all the renewal-race handling.
+disconnects anything. All of that stays with the server, which keeps the most dangerous
+third of the problem — and all the renewal-race handling — out of the pipeline entirely.
 
 **The client list lives with the pipeline.** The server knows realm ids and company names.
 It knows nothing about which grid a client's numbers belong in, and it shouldn't.
