@@ -4,7 +4,6 @@ import { log } from "../log.js";
 import { RateLimiter } from "../rate-limit.js";
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       /** Set by `requireServicePrincipal` once the shared secret matched. */
@@ -70,11 +69,7 @@ function bearerFrom(header: string | undefined): string | null {
   return token ? token : null;
 }
 
-function reject(
-  req: Request,
-  res: Response,
-  reason: RejectionReason,
-): void {
+function reject(req: Request, res: Response, reason: RejectionReason): void {
   // The reason and the caller's address, never the presented token — not its
   // value, not a prefix, not its length.
   log.warn(
@@ -98,7 +93,8 @@ export function requireServicePrincipal(
   options: ServiceAuthOptions,
 ): RequestHandler {
   const { token, principalId } = options;
-  const limiter = options.limiter ?? new RateLimiter(REQUESTS_PER_MINUTE, WINDOW_MS);
+  const limiter =
+    options.limiter ?? new RateLimiter(REQUESTS_PER_MINUTE, WINDOW_MS);
   setInterval(() => limiter.sweep(), SWEEP_MS).unref();
 
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -126,7 +122,11 @@ export function requireServicePrincipal(
 }
 
 /** One log line per authenticated request, mirroring `mcp_request`. */
-export function logApiRequest(req: Request, res: Response, next: NextFunction): void {
+export function logApiRequest(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   const start = process.hrtime.bigint();
   const path = pathOf(req);
   res.on("finish", () => {
