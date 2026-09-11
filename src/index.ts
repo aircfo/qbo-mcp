@@ -60,10 +60,17 @@ app.use((req, res, next) => {
 // Cap request bodies so a malicious client can't OOM us with a huge payload.
 app.use(express.json({ limit: "256kb" }));
 
-// CORS for browser-based MCP clients. Inlined to avoid a dependency. Scoped
-// to /mcp: only that path has a preflight handler, and there is no reason to
-// advertise a cross-origin policy on the machine-to-machine /api door.
-app.use("/mcp", (_req, res, next) => {
+// CORS for browser-based MCP clients. Inlined to avoid a dependency.
+//
+// Applies everywhere except /api. A browser client needs these headers on far
+// more than the /mcp transport: mcpAuthRouter serves discovery, registration,
+// /authorize, /token and /revoke from the app root, and a browser fetches
+// those cross-origin before it ever holds a bearer. Narrowing this to /mcp
+// would break claude.ai and Cowork at the discovery step. /api is excluded
+// because it is machine-to-machine — it takes a bearer rather than a cookie,
+// and has no reason to advertise a cross-origin policy.
+app.use((req, res, next) => {
+  if (req.path === "/api" || req.path.startsWith("/api/")) return next();
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.header(
