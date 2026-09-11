@@ -1,47 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { env } from "../config/env.js";
 import { connectionStore } from "../deps.js";
+import { summarizeConnection } from "./_connection-summary.js";
 import { asRecord, json, promisify, toolError } from "./_format.js";
 import { runQbo } from "./_shared.js";
-
-/**
- * What this server knows about the caller's connection without asking Intuit
- * anything: which company it is bound to, who authorized it, and when.
- */
-interface ConnectionSummary {
-  realmId: string;
-  environment: "sandbox" | "production";
-  companyName: string | null;
-  connectedBy: {
-    email: string | null;
-    /**
-     * Self-reported at connect time and never checked. Becomes a verified
-     * Google identity when sign-in moves to @aircfo.com accounts.
-     */
-    verified: boolean;
-  };
-  connectedAt: string;
-  lastRefreshAt: string;
-  writesEnabled: boolean;
-}
-
-function iso(epochMs: number): string {
-  return new Date(epochMs).toISOString();
-}
-
-function summarize(
-  connection: NonNullable<ReturnType<typeof connectionStore.get>>,
-): ConnectionSummary {
-  return {
-    realmId: connection.realmId,
-    environment: env.INTUIT_ENVIRONMENT,
-    companyName: connection.companyName,
-    connectedBy: { email: connection.email, verified: false },
-    connectedAt: iso(connection.createdAt),
-    lastRefreshAt: iso(connection.refreshUpdatedAt),
-    writesEnabled: false,
-  };
-}
 
 export function registerCompanyTools(
   server: McpServer,
@@ -77,7 +39,9 @@ export function registerCompanyTools(
 
           return {
             ...info,
-            connection: connection ? summarize(connection) : { realmId },
+            connection: connection
+              ? summarizeConnection(connection, env.INTUIT_ENVIRONMENT)
+              : { realmId },
           };
         },
         "get_company_info",
@@ -98,7 +62,7 @@ export function registerCompanyTools(
           "No QuickBooks connection is bound to this token. Re-authorize to reconnect.",
         );
       }
-      return json(summarize(connection));
+      return json(summarizeConnection(connection, env.INTUIT_ENVIRONMENT));
     },
   );
 }
