@@ -26,4 +26,4 @@ links costs more than the tidiness is worth.
 |---|---|---|
 | [`multi-client-access.md`](multi-client-access.md) | How does one person work across several clients' books without disconnecting and reconnecting? | Options recorded; recommendation is to wait on the operator-surface decision |
 | [`qbo-actuals-pipeline.md`](qbo-actuals-pipeline.md) | How do we pull QuickBooks actuals on a schedule, with nobody in the loop? | Proposed: the server keeps every credential and grows a read-only service API; the pipeline is a separate service. Awaiting agreement |
-| [`service-auth.md`](service-auth.md) | How does a scheduled job authenticate, given it cannot sign in as a person? | Specified and ready to build. Step 1 of the pipeline above |
+| [`service-auth.md`](service-auth.md) | How does a scheduled job authenticate, given it cannot sign in as a person? | **Built.** Step 1 of the pipeline above; the decision is in `decisions.md` |

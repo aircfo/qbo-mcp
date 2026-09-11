@@ -2,7 +2,7 @@ import express, { type ErrorRequestHandler } from "express";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { env } from "./config/env.js";
-import { oauthProvider, oauthStore } from "./deps.js";
+import { connectionStore, oauthProvider, oauthStore } from "./deps.js";
 import { SCOPE } from "./auth/provider.js";
 import {
   connectCancelHandler,
@@ -10,6 +10,7 @@ import {
 } from "./auth/connect-confirm.js";
 import { googleCallbackHandler } from "./auth/google-callback.js";
 import { intuitCallbackHandler } from "./auth/intuit-callback.js";
+import { serviceApiRouter } from "./api/index.js";
 import { log } from "./log.js";
 import { RateLimiter } from "./rate-limit.js";
 import {
@@ -59,8 +60,10 @@ app.use((req, res, next) => {
 // Cap request bodies so a malicious client can't OOM us with a huge payload.
 app.use(express.json({ limit: "256kb" }));
 
-// CORS for browser-based MCP clients. Inlined to avoid a dependency.
-app.use((_req, res, next) => {
+// CORS for browser-based MCP clients. Inlined to avoid a dependency. Scoped
+// to /mcp: only that path has a preflight handler, and there is no reason to
+// advertise a cross-origin policy on the machine-to-machine /api door.
+app.use("/mcp", (_req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.header(
@@ -95,6 +98,22 @@ app.get("/oauth/intuit/callback", intuitCallbackHandler);
 const connectForm = express.urlencoded({ extended: false, limit: "16kb" });
 app.post("/connect/confirm", connectForm, connectConfirmHandler);
 app.post("/connect/cancel", connectForm, connectCancelHandler);
+
+// The service door for scheduled jobs, mounted only when a token is
+// configured — so with no token these paths 404 rather than existing and
+// refusing. Ahead of mcpAuthRouter, which is mounted at the app root and
+// claims a broad set of paths.
+if (env.SERVICE_TOKEN) {
+  app.use(
+    "/api",
+    serviceApiRouter({
+      token: env.SERVICE_TOKEN,
+      principalId: env.SERVICE_PRINCIPAL_ID,
+      connections: connectionStore,
+    }),
+  );
+  log.info({ principal: env.SERVICE_PRINCIPAL_ID }, "service_api_enabled");
+}
 
 // MCP OAuth server endpoints: metadata discovery, dynamic client registration,
 // /authorize, /token, /revoke. Must be mounted at the app root.

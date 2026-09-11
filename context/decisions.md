@@ -392,3 +392,50 @@ only, so a stored access token that Intuit has invalidated early keeps failing
 for up to an hour instead of triggering one refresh-and-retry. That would have
 softened this incident, and it is worth doing, but it would also have hidden the
 bug; it belongs in its own change.
+
+## 2026-09-10 — A second front door for machines, read-only and absent by default
+
+**Decision:** a scheduled job authenticates with a single shared secret
+(`SERVICE_TOKEN`) against `/api`, rather than being given a person's credentials
+or a second copy of the Intuit tokens. `GET /api/connections` is the first and
+only endpoint; the report endpoints follow in a second change. Specified in
+[`context/product/service-auth.md`](product/service-auth.md).
+
+**Why a shared secret and not an identity.** Everything else here proves who a
+caller is through Google, and that is right for a person. A cron job has no
+person behind it, and inventing one — a service Google account, a teammate's
+credentials reused — would make the audit trail say something false. A named
+principal in every log line is more honest than a borrowed identity.
+
+**Why this door reaches every company when an MCP session reaches one.** That
+asymmetry is the whole point: a scheduled pull names companies by realm id and
+must reach all of them. It is also the risk, so it is bounded three ways rather
+than one. The routes are read-only permanently. They are not mounted at all
+unless a token is configured, so the surface does not exist until someone
+deliberately opens it. And every call is logged with the principal and the path.
+
+**Why unset means absent rather than refusing.** A surface that exists and
+answers 401 tells a prober that it exists and is worth attacking. One that was
+never registered is indistinguishable from a typo. Same posture as
+`ALLOWED_USERS` being empty: the quiet failure is the safe one.
+
+**Why the comparison hashes before comparing.** `timingSafeEqual` throws when
+its buffers differ in length, so the obvious guard compares lengths first — and
+leaks the secret's length through timing. Hashing both sides to a fixed 32 bytes
+removes the throw and the leak in one step. There is a test for the
+different-length case specifically, because that is the one a naive rewrite
+would turn back into a 500.
+
+**Why the response drops the authorizing address.** `listSummaries` carries
+`email`, and a pipeline has no use for it. Sending less is cheaper than
+deciding later who may see it, so the handler drops it and a test asserts the
+absence rather than trusting the shape.
+
+**Why choosing among several connections to one company is a pure function.**
+Several teammates can connect the same company. A caller should not have to
+choose, and the report lookup that comes next must resolve a realm the same
+way — two copies of that rule would drift. `status` is inferred rather than
+read, since there is no revoked column: a realm with no verified row predates
+the identity gate, and a refresh older than 90 days is almost certainly dead
+against Intuit's ~100-day life. Both are hints. Only using a credential proves
+it still works, which is what the report call's 409 will do.

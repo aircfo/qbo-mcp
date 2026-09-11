@@ -69,6 +69,20 @@ const envSchema = z.object({
         .filter((entry) => entry.length > 0),
     ),
 
+  // A scheduled job cannot sign in, so it authenticates with this shared
+  // secret instead. Optional on purpose: with no value the /api routes are
+  // never mounted, so those paths 404 like any other unknown URL. A surface
+  // that exists and rejects everything tells a prober that it exists.
+  SERVICE_TOKEN: z
+    .string()
+    .min(32, "SERVICE_TOKEN must be at least 32 characters")
+    .optional(),
+
+  // Names the non-interactive caller in logs, where the MCP surface would log
+  // a person's address. One principal today; a token-to-principal map is the
+  // extension point if that changes.
+  SERVICE_PRINCIPAL_ID: z.string().min(1).default("svc:actuals-pipeline"),
+
   // Who additionally gets the administrative tools (list/revoke connections,
   // enable writes). A subset of the people ALLOWED_USERS admits.
   ADMIN_USERS: z
