@@ -80,6 +80,23 @@ async function callQbo<T>(
 }
 
 /**
+ * Resolve a per-connection QuickBooks client and run a call against it, with
+ * the deadline and retry policy above applied.
+ *
+ * Returns the raw result and lets its errors escape, so a caller that is not
+ * an MCP tool — the service API, which has to map failures onto HTTP status
+ * codes — can classify them. `runQbo` is the MCP-shaped wrapper over this.
+ */
+export async function runQboRaw<T>(
+  connectionId: string,
+  run: (qb: QuickBooks, realmId: string) => Promise<T>,
+  tag = "qbo",
+): Promise<T> {
+  const { qb, realmId } = await clientManager.getClient(connectionId);
+  return callQbo(connectionId, tag, () => run(qb, realmId));
+}
+
+/**
  * Resolve a per-connection QuickBooks client, run a call against it, and wrap
  * the result as an MCP tool response. Centralises auth, deadlines, retries and
  * error shaping so each tool body is just the QBO call itself.
@@ -90,8 +107,7 @@ export async function runQbo(
   tag = "qbo",
 ): Promise<CallToolResult> {
   try {
-    const { qb, realmId } = await clientManager.getClient(connectionId);
-    return json(await callQbo(connectionId, tag, () => run(qb, realmId)));
+    return json(await runQboRaw(connectionId, run, tag));
   } catch (err) {
     if (err instanceof ReauthRequiredError) return toolError(err.message);
     if (err instanceof TimeoutError) {

@@ -115,6 +115,28 @@ curl -H "Authorization: Bearer $SERVICE_TOKEN" https://<domain>/api/connections
 You should get a list of companies with realm ids, names and freshness — and no
 credentials, and not the address of whoever authorized each connection.
 
+**What the door serves.** Two read-only endpoints:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/connections` | Every company the server can currently pull, one entry per company |
+| `GET /api/reports/:report` | One report for one company |
+
+`:report` is a fixed list — `profit-and-loss`, `balance-sheet`, `trial-balance`,
+`general-ledger`. Parameters are the same ones the Claude tools use: `realm`
+(required), `start_date`, `end_date`, `accounting_method`,
+`summarize_column_by`, `format`, `max_rows`.
+
+A report answers with three arrays, `columns`, `rows` and `totals`. **`totals`
+carries amounts booked directly to a parent account, which appear in no row.**
+A caller that sums `rows` alone reports less money than the client earned, and
+the numbers look plausible.
+
+Failures are codes a pipeline can act on rather than retry blindly: `404` means
+that company has never been connected, `409` means its credential lapsed and
+someone must reconnect it once, `502` means QuickBooks failed after this server
+had already retried.
+
 **Rotating it.** Set a new value in Railway, then update the job's copy. In
 between, the job's next call fails with 401 and a monthly job simply runs late.
 That is why there is no overlapping-secret machinery.

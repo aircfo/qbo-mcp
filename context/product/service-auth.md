@@ -23,7 +23,8 @@ reviewing on its own.
 
 ## Not in scope
 
-- `GET /api/reports/:report` (step 2).
+- ~~`GET /api/reports/:report` (step 2).~~ **Built, 2026-09-11.** Same auth, same
+  realm-resolution rule, on the same router.
 - More than one principal. The shape below leaves room; v1 has exactly one.
 - Anything that writes. See the hard rule at the end.
 
