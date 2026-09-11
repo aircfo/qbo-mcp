@@ -274,6 +274,35 @@ the bookkeeping repo needed a fallback when the entity endpoints returned 504
 five times running, and improvised one by comparing account ids to a stored
 fingerprint. A tool that reads only our own database is the better fallback.
 
+## 2026-09-10 — Access is every airCFO team member, expressed as a sentinel (Alex)
+
+**Decision:** `ALLOWED_USERS=*` with `ALLOWED_DOMAIN=aircfo.com` — any address on airCFO's Google
+Workspace whose `id_token` reports it verified. Not the eleven-name list the production table and
+the September plan implied.
+
+**Why a sentinel and not a list of 65 names.** A name list is worse than no list at this breadth: it
+locks out every new hire until someone edits an environment variable, and it revokes a departure no
+faster than disabling their Google account already does. `*` also keeps the tightening path open —
+set names and the sentinel is simply gone, no code change.
+
+**Why `*` and not "empty means everyone".** An empty variable must deny everyone. If empty meant
+"any domain member", a variable accidentally cleared during a deploy would silently open the server
+to a whole domain; with the sentinel it locks everyone out instead, which is the failure worth
+having. Fail closed on misconfiguration, open only on a deliberate, visible value.
+
+**What still gates a client's ledger.** Signing in proves who you are; it grants nothing. Reaching a
+company's books additionally requires completing Intuit consent for that company, and each grant is
+its own stored credential. This is why the broader policy is acceptable here while `aircfo-mcp`
+keeps an explicit list: that server holds a domain-wide Google key able to read any teammate's
+mailbox, where this one reads a ledger the caller was already granted. Same gate, different blast
+radius.
+
+**Also ruled the same day:** Kim gets her own `@aircfo.com` Google account before 2026-09-21, so the
+person who reviews a batch of writes is the person who approves it. Routing her approvals through
+Kevin or Justin was rejected for splitting reviewer from approver at exactly the step the approval
+exists for; dry-run-only for September remains the fallback if the account does not arrive.
+
+
 ## 2026-09-10 — Identity is Google, established before Intuit and re-checked every request
 
 **Decision:** the connect flow becomes Google → Intuit → confirm, and the public
