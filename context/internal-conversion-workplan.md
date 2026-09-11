@@ -258,7 +258,7 @@ stall an OAuth round trip and all 37 existing rows self-heal as they are used. A
 request that named no session at all. A test caught a real flaw on the way: `created_at` is
 millisecond-resolution, so `findByRealmAndEmail` orders by `rowid` too or a tie returns the older row.
 
-## PR 3 · `feat/google-identity` — who is calling (P2) · Wed 09-16 → Mon 09-21 · 1–2 sessions · Engineering review
+## PR 3 · `feat/google-identity` — who is calling (P2) · **open as [#16](https://github.com/aircfo/qbo-mcp/pull/16), CI pending; blocked on the Railway variables** (2026-09-10, ahead of the window) · Engineering review
 
 **Closes G5, G7; removes the public connect page.** Copies `aircfo-mcp`'s gate: `src/auth/google-idp.ts`
 (`googleAuthUrl`, `verifyGoogleCode` on `google-auth-library`'s `OAuth2Client`, scopes
@@ -297,6 +297,50 @@ merge is the backstop.
 teammate's verified email; removing an email from `ALLOWED_USERS` blocks that person's next call
 without a redeploy of anything else; `list_connections` shows every row with a company name; the
 Gmail user is either allowlisted or refused, per 0.2.
+
+**As built** (2026-09-10). One departure, recorded in `decisions.md`: the identity column is `email`
+plus an `email_verified` flag, not a second `authorized_by` column. Less to keep consistent, and it
+leaves `reconcileConnection`'s (realm, email) key untouched — which is what makes the one-time
+re-authorization *fold onto* the row it upgrades instead of adding a fourteenth row for Alex.
+Added beyond the list: the five connect-flow pages consolidated into one module, and `purgeExpired`
+given an injectable clock so its behaviour is exactly testable (the `RateLimiter` convention).
+
+**Hard precondition before merge.** `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
+`ALLOWED_USERS`, `ALLOWED_DOMAIN` and `ADMIN_USERS` must exist in the "QBO MCP Server" Railway
+variables first. Boot-time validation exits without them, so the deploy fails its healthcheck —
+safely, since Railway keeps the previous version running, but it fails.
+
+## PR 3a · `fix/revoke-the-right-token` — the hotfix PR 3 needed · **open as [#17](https://github.com/aircfo/qbo-mcp/pull/17), CI green** (2026-09-10)
+
+PR 3's first real use, on production, produced a connection that was already dead: Intuit answered
+`401 AuthenticationFailed, errorCode 3200` seconds after a successful exchange, and the confirmation
+page read `(name unavailable)` because its CompanyInfo lookup was the first call to hit it.
+
+`OAuthClient.revoke(params)` reads `params.access_token || params.refresh_token || <its own current
+token>`. Our wrapper passed `{ token }`, which it ignores, so every revoke fell through to the
+client's own token — and that client is a singleton whose state was last written by `createToken`. A
+re-authorization revoked the access token it had just minted. Full reasoning in `decisions.md`.
+
+Fixed by naming the parameter, removing the revoke from `reconcileConnection` entirely, and guarding
+the cancel path so it only revokes a connection it created. Revocation now works for the first time
+on this server, which also closes the half of G4 that observed old Intuit grants staying live.
+
+**What this says about the verification step.** The deploy was checked from outside and the database
+was read, but nothing asked *Intuit* whether the stored credentials still worked — and the answer
+was sitting in the logs as `company_name_lookup_failed`. Every future connect-flow change gets one
+more check before it is called done:
+
+```sh
+railway logs -n 200 --json -f 'company_name_lookup_failed OR qbo_upstream_error OR access_refused'
+```
+
+and, for a change that touches credentials, a direct call to Intuit with a stored token
+(`context/prod-query.js` is the pattern; print statuses, never tokens).
+
+**Named follow-up, not yet scheduled.** `QboClientManager` refreshes on expiry only, so an access
+token Intuit invalidates early keeps failing for up to an hour instead of triggering one
+refresh-and-retry. It would have softened this incident and would also have hidden the bug. Small,
+self-contained, and worth doing before the September close — fold into PR 6 or take it alone.
 
 ## PR 4 · `chore/teardown` + two sibling PRs — the public surface (P2) · Thu 09-17 → Fri 09-18, parallel to PR 3 · ½ session each
 

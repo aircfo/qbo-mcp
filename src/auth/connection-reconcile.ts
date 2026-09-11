@@ -1,8 +1,8 @@
 import type { Connection, NewConnection } from "../store/connection-store.js";
 
 /**
- * The store and revoke operations this module needs, narrowed to what it calls
- * so a test can supply plain objects.
+ * The store operations this module needs, narrowed to what it calls so a test
+ * can supply plain objects.
  */
 export interface ReconcileDeps {
   connections: {
@@ -16,16 +16,16 @@ export interface ReconcileDeps {
         refreshToken: string;
       },
     ): void;
+    setEmailVerified(id: string, verified: boolean): void;
   };
-  /** Best-effort upstream revoke of a token we are about to stop storing. */
-  revokeIntuitToken(token: string): Promise<void>;
-  onRevokeFailed(err: unknown, connectionId: string): void;
 }
 
 export interface ReconcileInput {
   realmId: string;
-  /** Self-reported at connect time, so it identifies a person only loosely. */
+  /** The address that authorized this connection. */
   email: string | null;
+  /** True when `email` came from a verified Google sign-in. */
+  emailVerified: boolean;
   termsAcceptedAt: number | null;
   accessToken: string;
   accessExpiresAt: number;
@@ -54,15 +54,19 @@ export interface ReconcileResult {
  * working, while deleting and re-creating would break each client except the
  * one that just authorized.
  *
- * Keying on a self-reported email is sound here even though it is unverified:
- * reaching this code at all means Intuit consent for that exact company
- * succeeded, so a caller who claims someone else's address gains nothing they
- * did not already prove they have.
+ * **Nothing is revoked here, deliberately.** The superseded refresh token and
+ * the one Intuit just issued belong to the same authorization — same app, same
+ * company, same person — and Intuit's revoke ends the authorization rather than
+ * an individual token. Revoking the old one therefore risks taking the new one
+ * with it, and the old one is superseded regardless. Revocation belongs where
+ * ending access is the actual intent: `disconnect_quickbooks`, the
+ * administrative `revoke_connection`, and cancelling a connection this flow
+ * just created.
  */
-export async function reconcileConnection(
+export function reconcileConnection(
   deps: ReconcileDeps,
   input: ReconcileInput,
-): Promise<ReconcileResult> {
+): ReconcileResult {
   const existing = input.email
     ? deps.connections.findByRealmAndEmail(input.realmId, input.email)
     : null;
@@ -72,6 +76,7 @@ export async function reconcileConnection(
       connectionId: deps.connections.create({
         realmId: input.realmId,
         email: input.email,
+        emailVerified: input.emailVerified,
         termsAcceptedAt: input.termsAcceptedAt,
         accessToken: input.accessToken,
         accessExpiresAt: input.accessExpiresAt,
@@ -81,23 +86,18 @@ export async function reconcileConnection(
     };
   }
 
-  // Retire the credential we are about to drop — but only when Intuit actually
-  // issued a different one. Revoking a refresh token also invalidates its
-  // access tokens, so revoking a value Intuit just handed back would destroy
-  // the connection this call is establishing.
-  if (existing.refreshToken !== input.refreshToken) {
-    try {
-      await deps.revokeIntuitToken(existing.refreshToken);
-    } catch (err) {
-      deps.onRevokeFailed(err, existing.id);
-    }
-  }
-
   deps.connections.updateTokens(existing.id, {
     accessToken: input.accessToken,
     accessExpiresAt: input.accessExpiresAt,
     refreshToken: input.refreshToken,
   });
+
+  // Promote a row that predates the identity gate. Its address was typed on
+  // the old connect page; the same address has now proved itself through
+  // Google, which is exactly what the one-time re-authorization is for.
+  if (input.emailVerified && !existing.emailVerified) {
+    deps.connections.setEmailVerified(existing.id, true);
+  }
 
   return { connectionId: existing.id, reused: true };
 }

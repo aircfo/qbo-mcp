@@ -40,6 +40,12 @@ function connectionIdFrom(req: Request): string | undefined {
     : undefined;
 }
 
+/** The verified address behind the bearer, for the audit trail in the logs. */
+function emailFrom(req: Request): string | null {
+  const extra = req.auth?.extra as { email?: unknown } | undefined;
+  return typeof extra?.email === "string" ? extra.email : null;
+}
+
 function sessionIdFrom(req: Request): string | undefined {
   const value = req.headers["mcp-session-id"];
   return typeof value === "string" && value !== "" ? value : undefined;
@@ -134,7 +140,14 @@ function logWhenFinished(
   res.on("finish", () => {
     const ms = Math.round(Number(process.hrtime.bigint() - start) / 1e6);
     log.info(
-      { connectionId, method: req.method, tool, status: res.statusCode, ms },
+      {
+        connectionId,
+        email: emailFrom(req),
+        method: req.method,
+        tool,
+        status: res.statusCode,
+        ms,
+      },
       "mcp_request",
     );
   });

@@ -16,7 +16,8 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthStore } from "./oauth-store.js";
 import { log } from "../log.js";
-import { renderConnectPage } from "./connect-page.js";
+import { isAllowedUser } from "./access.js";
+import { googleAuthUrl } from "./google-idp.js";
 
 /**
  * The single scope this server grants. Exported so the OAuth metadata
@@ -27,15 +28,26 @@ import { renderConnectPage } from "./connect-page.js";
 export const SCOPE = "com.intuit.quickbooks.accounting";
 
 /**
- * Bridges the MCP OAuth surface (Claude ↔ this server) to Intuit's OAuth
- * (this server ↔ QuickBooks). The `authorize` step renders the connect page
- * (which collects an email, then forwards to Intuit via /connect/start); the
- * Intuit callback (see auth/intuit-callback.ts) creates the connection and
- * issues our own authorization code. The remaining methods are the standard
- * code/refresh/verify lifecycle, backed by OAuthStore.
+ * Bridges the MCP OAuth surface (Claude ↔ this server) to the connect flow.
+ * `authorize` parks the request and sends the caller to Google, which
+ * establishes identity (auth/google-callback.ts); Intuit then grants access to
+ * a company (auth/intuit-callback.ts); and the confirmation step
+ * (auth/connect-confirm.ts) is where an authorization code is finally issued.
+ * The remaining methods are the standard code/refresh/verify lifecycle, backed
+ * by OAuthStore — with `verifyAccessToken` additionally re-checking identity on
+ * every request.
  */
 export class QboOAuthProvider implements OAuthServerProvider {
-  constructor(private readonly store: OAuthStore) {}
+  constructor(
+    private readonly store: OAuthStore,
+    /** Read to re-check identity on every request; see verifyAccessToken. */
+    private readonly connections: {
+      get(id: string): {
+        email: string | null;
+        emailVerified: boolean;
+      } | null;
+    },
+  ) {}
 
   get clientsStore(): OAuthRegisteredClientsStore {
     return this.store.clientsStore;
@@ -46,16 +58,18 @@ export class QboOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response,
   ): Promise<void> {
-    // The SDK has already validated client + redirect_uri + PKCE here, so we
-    // render the email-collection page; /connect/start re-validates on submit.
-    res.type("html").send(
-      renderConnectPage({
-        clientId: client.client_id,
-        redirectUri: params.redirectUri,
-        codeChallenge: params.codeChallenge,
-        mcpState: params.state,
-      }),
-    );
+    // The SDK has already validated client, redirect_uri and PKCE. Identity
+    // comes next: park the request under an opaque state and send the caller
+    // to Google. The old flow asked for an email on a form here and believed
+    // the answer.
+    const state = this.store.createPendingAuth({
+      clientId: client.client_id,
+      redirectUri: params.redirectUri,
+      codeChallenge: params.codeChallenge,
+      scopes: [],
+      mcpState: params.state,
+    });
+    res.redirect(googleAuthUrl(state));
   }
 
   async challengeForAuthorizationCode(
@@ -124,12 +138,43 @@ export class QboOAuthProvider implements OAuthServerProvider {
     const verified = this.store.verifyAccess(token);
     if (!verified)
       throw new InvalidTokenError("Unknown or expired access token");
+
+    // The allowlist is re-checked on every request, not just at sign-in, so
+    // removing someone cuts their access off immediately instead of whenever
+    // their token happens to expire. A connection made before the identity
+    // gate has no verified address and is refused here — that is the one-time
+    // re-authorization, and it is why it cannot be skipped.
+    const connection = this.connections.get(verified.connectionId);
+    const email = connection?.email ?? null;
+    if (
+      !connection ||
+      !email ||
+      !isAllowedUser(email, connection.emailVerified)
+    ) {
+      log.warn(
+        {
+          connectionId: verified.connectionId,
+          email,
+          emailVerified: connection?.emailVerified ?? false,
+          reason: !connection
+            ? "connection_gone"
+            : !connection.emailVerified
+              ? "identity_not_verified"
+              : "not_allowlisted",
+        },
+        "access_refused",
+      );
+      throw new InvalidTokenError(
+        "This connection needs to be re-authorized: sign in with your airCFO Google account.",
+      );
+    }
+
     return {
       token,
       clientId: verified.clientId,
       scopes: [SCOPE],
       expiresAt: Math.floor(verified.expiresAt / 1000),
-      extra: { connectionId: verified.connectionId },
+      extra: { connectionId: verified.connectionId, email },
     };
   }
 

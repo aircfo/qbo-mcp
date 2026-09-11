@@ -19,4 +19,4 @@ export const connectionStore = new ConnectionStore(db, cipher);
 export const oauthStore = new OAuthStore(db);
 export const intuitOAuth = new IntuitOAuth();
 export const clientManager = new QboClientManager(connectionStore, intuitOAuth);
-export const oauthProvider = new QboOAuthProvider(oauthStore);
+export const oauthProvider = new QboOAuthProvider(oauthStore, connectionStore);

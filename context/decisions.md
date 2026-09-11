@@ -301,3 +301,94 @@ radius.
 person who reviews a batch of writes is the person who approves it. Routing her approvals through
 Kevin or Justin was rejected for splitting reviewer from approver at exactly the step the approval
 exists for; dry-run-only for September remains the fallback if the account does not arrive.
+
+
+## 2026-09-10 — Identity is Google, established before Intuit and re-checked every request
+
+**Decision:** the connect flow becomes Google → Intuit → confirm, and the public
+connect page is deleted.
+
+1. **Google first, Intuit second.** `provider.authorize` parks the MCP
+   authorization and redirects to Google; `/oauth/google/callback` verifies the
+   signed `id_token`, applies the domain and allowlist gate, and only then
+   forwards to Intuit. An address we do not admit never reaches QuickBooks at
+   all. The old flow asked for an email on a form and believed the answer.
+2. **Each leg gets its own single-use state.** The Google state is consumed at
+   its callback and a *new* state is minted for Intuit with the verified address
+   attached, so the Google leg cannot be replayed into a second Intuit consent.
+3. **The gate runs on every request, not just at sign-in.** `verifyAccessToken`
+   loads the connection and re-applies the allowlist, so removing someone ends
+   their access on their next call rather than whenever their token expires.
+   A connection made before the gate has no verified address and is refused
+   there — that is the one-time re-authorization, and it is deliberately not
+   skippable.
+4. **A confirmation step before the authorization code.** Intuit's company
+   picker decides which company a grant covers and this server has no say in it,
+   so connecting the wrong company was silent. The person now sees the company
+   name and realm and must confirm; declining revokes the grant. A connection
+   the flow *created* is deleted on cancel, one it merely refreshed is not —
+   that row belongs to connections the person already had.
+5. **`email_verified` rather than a second address column.** The plan called for
+   an `authorized_by` column beside `email`. One address column plus a verified
+   flag is less to keep consistent, and it leaves `reconcileConnection`'s
+   (realm, email) key untouched — so the one-time re-authorization *folds onto*
+   the row it upgrades instead of creating another.
+6. **Domain-wide by a visible sentinel.** `ALLOWED_USERS=*` admits any verified
+   address on `ALLOWED_DOMAIN`; an empty value admits nobody. See the access
+   decision logged the same day for why the failure mode points that way.
+
+**Administrative tools** (`list_connections`, `revoke_connection`,
+`set_writes_enabled`) are registered only for sessions whose verified address is
+in `ADMIN_USERS`, so they are absent from other tool lists rather than present
+and refusing. They close the "no admin-initiated revocation" limitation
+`SECURITY.md` carried, and they are what will clean up the orphan rows that
+predate the reconcile change.
+
+**Also:** expired `oauth_tokens` rows are swept hourly with a week of grace.
+Nothing pruned them before, so the table held 923 access tokens for 37
+connections.
+
+## 2026-09-10 — Revocation: name the token, and only revoke when ending access is the intent
+
+**The incident.** The first real re-authorization through the new identity gate
+produced a connection that was already dead: Intuit answered
+`401 AuthenticationFailed, errorCode 3200` seconds after a successful token
+exchange, and the confirmation page showed "(name unavailable)" because its
+CompanyInfo lookup was the first call to hit it.
+
+**Root cause, and it is one line.** `OAuthClient.revoke(params)` reads
+`params.access_token || params.refresh_token || <the client's own current
+token>`. Our wrapper called `this.oauth.revoke({ token })` — a key the library
+ignores. So every revoke fell through to the client's own token, and that client
+is a long-lived singleton whose token state was last written by `createToken`.
+A re-authorization therefore revoked **the access token it had just minted**.
+
+Two things follow from the same bug. Revocation has never actually worked on
+this server: `disconnect_quickbooks` hit the same fallback with an empty token
+state, which is part of why G4 observed old Intuit grants staying live for 100
+days. And the failure only became visible now because nothing used to make a
+QuickBooks call immediately after connecting.
+
+**Decisions.**
+
+1. **`IntuitOAuth.revoke` passes `{ refresh_token }`.** `IntuitOAuth` now takes
+   its client by constructor injection so the parameter name is covered by a
+   test rather than by care.
+2. **`reconcileConnection` revokes nothing.** The superseded refresh token and
+   the one Intuit just issued belong to the same authorization — same app,
+   company and person — and Intuit's revoke ends the authorization, not an
+   individual token. So revoking the old one risks taking the new one with it,
+   and the old one is superseded regardless. The function is now synchronous,
+   which is a fair signal that it does no I/O.
+3. **Cancelling only revokes a connection this flow created.** Cancel used to
+   revoke unconditionally, which for a *reused* row would have ended an
+   authorization shared with that person's other MCP clients.
+4. **Revocation stays where ending access is the intent:**
+   `disconnect_quickbooks`, the administrative `revoke_connection`, and
+   cancelling a newly created connection — and it works now.
+
+**Known follow-up, not taken here.** `QboClientManager` refreshes on expiry
+only, so a stored access token that Intuit has invalidated early keeps failing
+for up to an hour instead of triggering one refresh-and-retry. That would have
+softened this incident, and it is worth doing, but it would also have hidden the
+bug; it belongs in its own change.
