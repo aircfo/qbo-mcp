@@ -130,7 +130,8 @@ arrays instead of two.
 **One hard rule.** This door is read-only permanently. No endpoint that changes a client's
 books is ever added to it, whatever the server's Claude tools grow later.
 
-**Size:** about a day.
+**Size:** about a day. The auth layer and the first endpoint are specified in full in
+[`service-auth.md`](service-auth.md) and are the first thing to build.
 
 ## Piece 2 — the pipeline
 
