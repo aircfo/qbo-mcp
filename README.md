@@ -128,6 +128,13 @@ work, point `PUBLIC_URL` at `http://localhost:8080`, set
 `http://localhost:8080/oauth/google/callback` to the Google client's redirect
 URIs.
 
+## Joining this repo
+
+New here? **[`ONBOARDING.md`](ONBOARDING.md)** is written for you, including if you build
+with Claude rather than by hand: setup, the working loop, the rules that matter, and the
+vocabulary. [`CLAUDE.md`](CLAUDE.md) holds the house rules and is loaded automatically by
+every Claude Code session in this repo.
+
 ## Commands
 
 ```sh
