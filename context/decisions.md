@@ -439,3 +439,38 @@ read, since there is no revoked column: a realm with no verified row predates
 the identity gate, and a refresh older than 90 days is almost certainly dead
 against Intuit's ~100-day life. Both are hints. Only using a credential proves
 it still works, which is what the report call's 409 will do.
+
+## 2026-09-11 — Report endpoints reuse the tools' machinery, and their own error vocabulary
+
+**Decision:** `GET /api/reports/:report` serves four reports to a scheduled job over the
+same service-token door. It shares the deadline, retry and client resolution the Claude
+tools already use, and differs only in how failures are expressed.
+
+**Why `runQboRaw` rather than a second call path.** The tools funnel every QuickBooks call
+through one place that applies a 45-second deadline and retries transient upstream
+failures. Duplicating that for the API would mean two timeout policies drifting apart, so
+the raw runner was extracted and `runQbo` became the MCP-shaped wrapper over it. The API
+uses the raw one because it has to classify errors, where a tool only has to describe them.
+
+**Why the slug is an allow-list.** `:report` arrives from an unattended caller, so a typo
+should be a 400 here rather than a surprising call to Intuit. It also means a path
+traversal attempt is answered as an unknown report instead of reaching anything.
+
+**Why these status codes.** A pipeline should act on a failure, not retry it blindly.
+`404` means the company has never been connected and someone must connect it once. `409`
+means the credential lapsed and someone must reconnect it once — retrying will not help,
+and a job that retries a 409 for an hour just delays the alert. `502` means QuickBooks
+itself failed, after this server already retried, and is the only one worth trying again.
+
+**Why the realm resolves through `selectConnections`.** The listing endpoint tells a
+caller which connection represents a company; the report endpoint must use that same one,
+or the two can disagree and a pipeline pulls from a connection it was never told about.
+One function, called by both.
+
+**Why `totals` is not optional.** QuickBooks books some amounts directly against a parent
+account, and those appear only in a subtotal row. A caller summing `rows` alone
+under-reports and the numbers stay plausible, which is the worst failure available here.
+The endpoint's test asserts a subtotal that exceeds the sum of its rows, so collapsing the
+response to two arrays fails loudly.
+
+**What this does not change.** The door stays read-only permanently.

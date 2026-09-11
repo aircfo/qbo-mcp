@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { logApiRequest, requireServicePrincipal } from "./auth.js";
 import { connectionsHandler, type ConnectionsSource } from "./connections.js";
+import { reportsHandler } from "./reports.js";
 
 export interface ServiceApiOptions {
   token: string;
@@ -30,5 +31,6 @@ export function serviceApiRouter(options: ServiceApiOptions): Router {
   );
   router.use(logApiRequest);
   router.get("/connections", connectionsHandler(options.connections));
+  router.get("/reports/:report", reportsHandler(options.connections));
   return router;
 }
