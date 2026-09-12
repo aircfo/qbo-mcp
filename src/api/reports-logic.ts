@@ -1,3 +1,5 @@
+import { MAX_ROWS_CEILING } from "../tools/_format.js";
+
 /**
  * The reports a scheduled job may ask for, by URL slug.
  *
@@ -20,10 +22,6 @@ export function isReportSlug(value: string): value is ReportSlug {
 
 const ACCOUNTING_METHODS = ["Cash", "Accrual"] as const;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Row cap for a detail report, so an unfiltered pull degrades gracefully. */
-export const DEFAULT_MAX_ROWS = 5000;
-const MAX_ROWS_CEILING = 50_000;
 
 export interface ReportRequest {
   realm: string;

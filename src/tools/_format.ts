@@ -274,6 +274,16 @@ export function flattenReport(report: unknown): FlatReport {
 }
 
 /**
+ * Row caps for detail reports. The default keeps an unfiltered pull inside
+ * the inline limit; the ceiling bounds what a caller may ask for at all, so a
+ * huge cap cannot turn graceful truncation into a timeout or an oversized
+ * response. The MCP tools and the service API validate against these same
+ * two numbers, so the surfaces cannot drift apart.
+ */
+export const DEFAULT_MAX_ROWS = 5000;
+export const MAX_ROWS_CEILING = 50_000;
+
+/**
  * Shape a report for return: `raw` passes the QBO JSON through untouched;
  * otherwise flatten to compact arrays and apply an optional cap on `rows`,
  * returning a truncation envelope (totals are kept) when the cap is hit.
