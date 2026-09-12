@@ -14,28 +14,26 @@ import {
 import { runQboRaw } from "../tools/_shared.js";
 import { selectConnections } from "./connections-logic.js";
 import type { ConnectionsSource } from "./connections.js";
-import { isReportSlug, parseReportQuery, type ReportSlug } from "./reports-logic.js";
+import {
+  REPORTS,
+  isReportSlug,
+  parseReportQuery,
+  type ReportSlug,
+} from "./reports-logic.js";
 
 type QboCb = (err: unknown, data: unknown) => void;
 type ReportCaller = (qb: QuickBooks, params: object, cb: QboCb) => void;
 
-/**
- * Each slug's call into the Reports API, and whether it needs a row cap.
- *
- * The general ledger is the only detail report here, and an unfiltered pull of
- * it can be enormous, so it carries the default cap while the summaries do not.
- */
-const CALLERS: Record<
-  ReportSlug,
-  { call: ReportCaller; defaultMaxRows?: number }
-> = {
-  "profit-and-loss": { call: (qb, p, cb) => qb.reportProfitAndLoss(p, cb) },
-  "balance-sheet": { call: (qb, p, cb) => qb.reportBalanceSheet(p, cb) },
-  "trial-balance": { call: (qb, p, cb) => qb.reportTrialBalance(p, cb) },
-  "general-ledger": {
-    call: (qb, p, cb) => qb.reportGeneralLedgerDetail(p, cb),
-    defaultMaxRows: DEFAULT_MAX_ROWS,
-  },
+/** Each slug's call into the Reports API. What each accepts lives in `REPORTS`. */
+const CALLERS: Record<ReportSlug, ReportCaller> = {
+  "profit-and-loss": (qb, p, cb) => qb.reportProfitAndLoss(p, cb),
+  "balance-sheet": (qb, p, cb) => qb.reportBalanceSheet(p, cb),
+  "trial-balance": (qb, p, cb) => qb.reportTrialBalance(p, cb),
+  "general-ledger": (qb, p, cb) => qb.reportGeneralLedgerDetail(p, cb),
+  "aged-receivables": (qb, p, cb) => qb.reportAgedReceivables(p, cb),
+  "aged-payables": (qb, p, cb) => qb.reportAgedPayables(p, cb),
+  "sales-by-customer": (qb, p, cb) => qb.reportCustomerSales(p, cb),
+  "transaction-list": (qb, p, cb) => qb.reportTransactionList(p, cb),
 };
 
 function promisify(
@@ -65,7 +63,7 @@ export function reportsHandler(source: ConnectionsSource) {
       return;
     }
 
-    const parsed = parseReportQuery(req.query as Record<string, unknown>);
+    const parsed = parseReportQuery(slug, req.query as Record<string, unknown>);
     if (!parsed.ok) {
       res.status(400).json({ error: "invalid_request", detail: parsed.error });
       return;
@@ -92,7 +90,8 @@ export function reportsHandler(source: ConnectionsSource) {
       return;
     }
 
-    const { call, defaultMaxRows } = CALLERS[slug];
+    const call = CALLERS[slug];
+    const defaultMaxRows = REPORTS[slug].detail ? DEFAULT_MAX_ROWS : undefined;
     try {
       const report = await runQboRaw(
         entry.connectionId,

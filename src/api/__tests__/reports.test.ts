@@ -14,6 +14,8 @@ vi.mock("../../deps.js", () => ({
 }));
 
 const { serviceApiRouter } = await import("../index.js");
+const { REPORT_SLUGS } = await import("../reports-logic.js");
+const { DEFAULT_MAX_ROWS } = await import("../../tools/_format.js");
 const { ConnectionNotFoundError, ReauthRequiredError } = await import(
   "../../qbo/client-manager.js"
 );
@@ -66,9 +68,29 @@ const REPORT = {
   },
 };
 
+/**
+ * A transaction list one row past the default cap, so a test can prove the
+ * cap applies to this report the way it does to the general ledger.
+ */
+const LONG_LIST = {
+  Columns: { Column: [{ ColTitle: "Date" }, { ColTitle: "Amount" }] },
+  Rows: {
+    Row: Array.from({ length: DEFAULT_MAX_ROWS + 1 }, () => ({
+      ColData: [{ value: "2026-08-15" }, { value: "1.00" }],
+    })),
+  },
+};
+
+type FakeCall = (p: object, cb: (e: unknown, d: unknown) => void) => void;
+const answer =
+  (report: unknown): FakeCall =>
+  (_p, cb) =>
+    cb(null, report);
+
 let rows: ConnectionSummaryRow[] = [ROW];
 let server: Server;
 let baseUrl: string;
+let lastParams: Record<string, unknown> | undefined;
 
 beforeAll(async () => {
   const app = express();
@@ -93,19 +115,24 @@ afterAll(async () => {
 
 beforeEach(() => {
   rows = [ROW];
+  lastParams = undefined;
   getClient.mockReset();
+  const remembering =
+    (report: unknown): FakeCall =>
+    (p, cb) => {
+      lastParams = { ...p };
+      answer(report)(p, cb);
+    };
   getClient.mockResolvedValue({
     qb: {
-      reportProfitAndLoss: (_p: object, cb: (e: unknown, d: unknown) => void) =>
-        cb(null, REPORT),
-      reportBalanceSheet: (_p: object, cb: (e: unknown, d: unknown) => void) =>
-        cb(null, REPORT),
-      reportTrialBalance: (_p: object, cb: (e: unknown, d: unknown) => void) =>
-        cb(null, REPORT),
-      reportGeneralLedgerDetail: (
-        _p: object,
-        cb: (e: unknown, d: unknown) => void,
-      ) => cb(null, REPORT),
+      reportProfitAndLoss: remembering(REPORT),
+      reportBalanceSheet: remembering(REPORT),
+      reportTrialBalance: remembering(REPORT),
+      reportGeneralLedgerDetail: remembering(REPORT),
+      reportAgedReceivables: remembering(REPORT),
+      reportAgedPayables: remembering(REPORT),
+      reportCustomerSales: remembering(REPORT),
+      reportTransactionList: remembering(LONG_LIST),
     },
     realmId: "793988035",
   });
@@ -140,14 +167,48 @@ describe("GET /api/reports/:report", () => {
     expect(reported).toBeGreaterThan(rowSum);
   });
 
-  it.each([
-    "profit-and-loss",
-    "balance-sheet",
-    "trial-balance",
-    "general-ledger",
-  ])("serves %s", async (slug) => {
+  it.each(REPORT_SLUGS)("serves %s", async (slug) => {
     const res = await get(`/api/reports/${slug}?realm=793988035`);
     expect(res.status).toBe(200);
+  });
+
+  it("forwards an as-of date to an aging report", async () => {
+    const res = await get(
+      "/api/reports/aged-receivables?realm=793988035&report_date=2026-08-31",
+    );
+    expect(res.status).toBe(200);
+    expect(lastParams).toEqual({ report_date: "2026-08-31" });
+  });
+
+  it("answers 400 rather than forwarding a parameter the report does not take", async () => {
+    // QuickBooks would ignore the range and age as of today, silently.
+    const res = await get(
+      "/api/reports/aged-payables?realm=793988035&start_date=2026-08-01&end_date=2026-08-31",
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_request");
+    expect(getClient).not.toHaveBeenCalled();
+  });
+
+  it("caps an unfiltered transaction list at the default, like the general ledger", async () => {
+    const res = await get("/api/reports/transaction-list?realm=793988035");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: string[][];
+      truncated?: boolean;
+      returned?: number;
+    };
+    expect(body.truncated).toBe(true);
+    expect(body.returned).toBe(DEFAULT_MAX_ROWS);
+    expect(body.rows).toHaveLength(DEFAULT_MAX_ROWS);
+  });
+
+  it("splits sales by customer into period columns on request", async () => {
+    const res = await get(
+      "/api/reports/sales-by-customer?realm=793988035&start_date=2026-01-01&end_date=2026-08-31&summarize_column_by=Month",
+    );
+    expect(res.status).toBe(200);
+    expect(lastParams).toMatchObject({ summarize_column_by: "Month" });
   });
 
   it("answers 400 for a report that is not on the list", async () => {
