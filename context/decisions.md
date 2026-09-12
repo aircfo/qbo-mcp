@@ -474,3 +474,28 @@ The endpoint's test asserts a subtotal that exceeds the sum of its rows, so coll
 response to two arrays fails loudly.
 
 **What this does not change.** The door stays read-only permanently.
+
+## 2026-09-12 — The machine door refuses a pre-gate row and tries a stale one; row caps have one home
+
+Prompted by the pre-launch Codex review (`context/codex-review-2026-09-12.md`, items 1 and 3).
+
+**Decision:** `GET /api/reports/:report` answers 409 `reauth_required`, without calling
+QuickBooks, when the connection chosen for a realm has no verified identity. A connection
+whose refresh is merely stale is still tried.
+
+**Why the two cases differ.** The 09-10 decision made `status` a hint, because whether Intuit
+still honours a credential is only knowable by using it. That is true of staleness. It is not
+true of an unverified row: that row predates the Google gate, `verifyAccessToken` refuses it
+at the MCP door on every request, and the refusal is a rule about identity rather than a
+prediction about Intuit. A shared secret held by a machine must not be the one caller that can
+still read through a credential no verified person has re-authorized. So `selectConnections`
+now says *why* a row needs reconnecting — `unverified` or `stale`, as a discriminated union —
+and the report endpoint refuses only the first. The listing's public shape is unchanged.
+
+**Also decided:** `DEFAULT_MAX_ROWS` and `MAX_ROWS_CEILING` live once, in `src/tools/_format.ts`,
+and both surfaces validate against them. The MCP tools had a floor and no ceiling while the
+API had both, which is exactly the drift a shared constant prevents. The ceiling is 50,000.
+
+**Not decided here:** the write path (review item 5). The requirement it adds — every write
+guard re-checked at call time, since a session outlives a switch flip — is recorded in the PR 5
+section of `context/internal-conversion-workplan.md` for the write PR to satisfy.

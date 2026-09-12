@@ -3,6 +3,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type QuickBooks from "node-quickbooks";
 import {
+  DEFAULT_MAX_ROWS,
+  MAX_ROWS_CEILING,
   definedOnly,
   promisify,
   requireBothDates,
@@ -12,9 +14,6 @@ import { runQbo } from "./_shared.js";
 
 type QboCb = (err: unknown, data: unknown) => void;
 type ReportCaller = (qb: QuickBooks, params: object, cb: QboCb) => void;
-
-/** Default row cap for detail reports, so an unfiltered pull degrades gracefully. */
-const DEFAULT_MAX_ROWS = 5000;
 
 // Shared parameter fragments (QBO Reports API names, passed through verbatim).
 const dateRange = {
@@ -90,9 +89,10 @@ const maxRowsParam = z
   .number()
   .int()
   .min(1)
+  .max(MAX_ROWS_CEILING)
   .optional()
   .describe(
-    `Cap on returned rows in compact mode (default ${DEFAULT_MAX_ROWS}). When exceeded, rows are truncated and a hint is returned.`,
+    `Cap on returned rows in compact mode (default ${DEFAULT_MAX_ROWS}, at most ${MAX_ROWS_CEILING}). When exceeded, rows are truncated and a hint is returned.`,
   );
 
 // Aging-detail params shared by the A/R and A/P detail reports. QBO's detail
@@ -803,7 +803,7 @@ export function registerReportTools(
           .enum(["Cleared", "Uncleared", "Reconciled", "Deposited"])
           .optional()
           .describe(
-            "Bank-clearing status. 'Uncleared' with an `account` filter and a date range is the uncleared-items list for a reconciliation — QuickBooks exposes no reconciliation report through its API, so this is the closest thing to one.",
+            "Bank-clearing status. 'Uncleared' with a date range is the uncleared-items list for a reconciliation — QuickBooks exposes no reconciliation report through its API, so this is the closest thing to one. This report has no per-account filter: narrow to a type with `source_account_type` ('Bank' or 'CreditCard') and separate accounts with `group_by` 'Account' or the account_name column.",
           ),
         docnum: z
           .string()

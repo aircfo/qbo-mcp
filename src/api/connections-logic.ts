@@ -8,16 +8,27 @@ import type { ConnectionSummaryRow } from "../store/connection-store.js";
  */
 export const STALE_REFRESH_MS = 90 * 24 * 60 * 60_000;
 
-export type ConnectionStatus = "ok" | "needs_reconnect";
+/**
+ * Why a connection needs reconnecting. `unverified` means the row predates the
+ * identity gate and no verified person has re-authorized it; every other door
+ * refuses such a row on sight. `stale` is only a prediction that Intuit has
+ * dropped the authorization, and using the credential is the one way to know.
+ */
+export type ReconnectReason = "unverified" | "stale";
 
-export interface RealmConnection {
+type ConnectionHealth =
+  | { status: "ok" }
+  | { status: "needs_reconnect"; reason: ReconnectReason };
+
+export type ConnectionStatus = ConnectionHealth["status"];
+
+export type RealmConnection = {
   realmId: string;
   companyName: string | null;
   connectionId: string;
-  status: ConnectionStatus;
   connectedAt: number;
   lastRefreshAt: number;
-}
+} & ConnectionHealth;
 
 /**
  * Which row represents a realm: a verified identity beats an unverified one
@@ -63,14 +74,22 @@ export function selectConnections(
     realmId: row.realm_id,
     companyName: row.company_name,
     connectionId: row.id,
-    status: statusOf(row, now),
     connectedAt: row.created_at,
     lastRefreshAt: row.refresh_updated_at,
+    ...healthOf(row, now),
   }));
 }
 
-function statusOf(row: ConnectionSummaryRow, now: number): ConnectionStatus {
-  if (row.email_verified !== 1) return "needs_reconnect";
-  if (now - row.refresh_updated_at > STALE_REFRESH_MS) return "needs_reconnect";
-  return "ok";
+/**
+ * `unverified` outranks `stale`: a row from before the identity gate must be
+ * re-authorized whatever its refresh date says.
+ */
+function healthOf(row: ConnectionSummaryRow, now: number): ConnectionHealth {
+  if (row.email_verified !== 1) {
+    return { status: "needs_reconnect", reason: "unverified" };
+  }
+  if (now - row.refresh_updated_at > STALE_REFRESH_MS) {
+    return { status: "needs_reconnect", reason: "stale" };
+  }
+  return { status: "ok" };
 }

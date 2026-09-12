@@ -89,7 +89,7 @@ Report tools return a compact, lossless shape by default
 (`{ columns, rows, totals }` — array rows aligned to one header; `totals` keeps
 section subtotals so amounts posted directly to a parent account aren't lost).
 Pass `format: "raw"` for the full QBO JSON. Detail reports accept `max_rows`
-(default 5000, caps `rows`). A full unfiltered month of general ledger is large
+(default 5000, at most 50,000, caps `rows`). A full unfiltered month of general ledger is large
 regardless — narrow it with `columns`/filters, or use `get_expenses_by_vendor`
 for vendor spend (one call, returns inline).
 

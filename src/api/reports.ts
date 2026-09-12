@@ -5,16 +5,16 @@ import {
   ConnectionNotFoundError,
   ReauthRequiredError,
 } from "../qbo/client-manager.js";
-import { TimeoutError, qboErrorMessage, shapeReport } from "../tools/_format.js";
+import {
+  DEFAULT_MAX_ROWS,
+  TimeoutError,
+  qboErrorMessage,
+  shapeReport,
+} from "../tools/_format.js";
 import { runQboRaw } from "../tools/_shared.js";
 import { selectConnections } from "./connections-logic.js";
 import type { ConnectionsSource } from "./connections.js";
-import {
-  DEFAULT_MAX_ROWS,
-  isReportSlug,
-  parseReportQuery,
-  type ReportSlug,
-} from "./reports-logic.js";
+import { isReportSlug, parseReportQuery, type ReportSlug } from "./reports-logic.js";
 
 type QboCb = (err: unknown, data: unknown) => void;
 type ReportCaller = (qb: QuickBooks, params: object, cb: QboCb) => void;
@@ -51,8 +51,9 @@ function promisify(
  *
  * Failures are mapped onto status codes a pipeline can act on rather than
  * retry blindly: 404 means nobody has ever connected that company, 409 means
- * its credential lapsed and a human must reconnect once, and 502 means
- * QuickBooks itself failed after this server had already retried.
+ * its credential lapsed or was never re-authorized through the identity gate
+ * and a human must reconnect once, and 502 means QuickBooks itself failed
+ * after this server had already retried.
  */
 export function reportsHandler(source: ConnectionsSource) {
   return async (req: Request, res: Response): Promise<void> => {
@@ -79,6 +80,15 @@ export function reportsHandler(source: ConnectionsSource) {
     );
     if (!entry) {
       res.status(404).json({ error: "not_connected", realm });
+      return;
+    }
+
+    // Every other door refuses a row from before the identity gate, and a
+    // machine secret must not be the one caller that can still read through
+    // it. A stale row is different: staleness is a prediction, and the call
+    // below is the only way to test it, so it is allowed to try.
+    if (entry.status === "needs_reconnect" && entry.reason === "unverified") {
+      res.status(409).json({ error: "reauth_required", realm });
       return;
     }
 

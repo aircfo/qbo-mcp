@@ -182,6 +182,23 @@ describe("GET /api/reports/:report", () => {
     expect((await res.json()).error).toBe("reauth_required");
   });
 
+  it("answers 409 without touching QuickBooks when the only connection predates the identity gate", async () => {
+    // Every other door refuses a pre-gate row; the machine door must not be
+    // the one caller that can still read through it.
+    rows = [{ ...ROW, email_verified: 0 }];
+    const res = await get("/api/reports/profit-and-loss?realm=793988035");
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("reauth_required");
+    expect(getClient).not.toHaveBeenCalled();
+  });
+
+  it("still tries a verified connection whose refresh is stale, since staleness is only a prediction", async () => {
+    rows = [{ ...ROW, refresh_updated_at: NOW - 100 * DAY }];
+    const res = await get("/api/reports/profit-and-loss?realm=793988035");
+    expect(res.status).toBe(200);
+    expect(getClient).toHaveBeenCalledWith("conn-live");
+  });
+
   it("answers 502 when QuickBooks itself fails", async () => {
     getClient.mockResolvedValue({
       qb: {

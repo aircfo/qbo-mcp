@@ -124,7 +124,7 @@ arrays instead of two.
 | Status | Meaning | What the pipeline should do |
 |---|---|---|
 | `404` | That company has never been connected | Someone on the team connects it once, then re-run |
-| `409` | The connection expired or was revoked | Same — reconnect once, and stop retrying meanwhile |
+| `409` | The connection expired or was revoked, or predates the identity gate and was never re-authorized | Same — reconnect once, and stop retrying meanwhile |
 | `502` | QuickBooks failed or was too slow | Retry later; the server already retried twice |
 
 **One hard rule.** This door is read-only permanently. No endpoint that changes a client's

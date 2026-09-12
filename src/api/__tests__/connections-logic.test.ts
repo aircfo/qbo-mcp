@@ -69,7 +69,10 @@ describe("selectConnections", () => {
   it("reports a realm with only unverified connections rather than hiding it", () => {
     const result = selectConnections([row({ email_verified: 0 })], NOW);
     expect(result).toHaveLength(1);
-    expect(result[0].status).toBe("needs_reconnect");
+    expect(result[0]).toMatchObject({
+      status: "needs_reconnect",
+      reason: "unverified",
+    });
   });
 
   it("reports a connection whose refresh is older than the stale threshold", () => {
@@ -77,7 +80,26 @@ describe("selectConnections", () => {
       [row({ refresh_updated_at: NOW - STALE_REFRESH_MS - 1 })],
       NOW,
     );
-    expect(result[0].status).toBe("needs_reconnect");
+    expect(result[0]).toMatchObject({
+      status: "needs_reconnect",
+      reason: "stale",
+    });
+  });
+
+  it("names the identity gap, not the stale refresh, when a row has both", () => {
+    const result = selectConnections(
+      [
+        row({
+          email_verified: 0,
+          refresh_updated_at: NOW - STALE_REFRESH_MS - 1,
+        }),
+      ],
+      NOW,
+    );
+    expect(result[0]).toMatchObject({
+      status: "needs_reconnect",
+      reason: "unverified",
+    });
   });
 
   it("reports a connection refreshed just inside the threshold as ok", () => {
