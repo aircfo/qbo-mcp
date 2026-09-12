@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { REPORT_SLUGS, isReportSlug, parseReportQuery } from "../reports-logic.js";
+import {
+  REPORTS,
+  REPORT_SLUGS,
+  isReportSlug,
+  parseReportQuery,
+  type ReportSlug,
+} from "../reports-logic.js";
 
-function ok(query: Record<string, unknown>) {
-  const result = parseReportQuery(query);
+function ok(query: Record<string, unknown>, slug: ReportSlug = "profit-and-loss") {
+  const result = parseReportQuery(slug, query);
   if (!result.ok) throw new Error(`expected success, got: ${result.error}`);
   return result.request;
 }
 
-function err(query: Record<string, unknown>): string {
-  const result = parseReportQuery(query);
+function err(
+  query: Record<string, unknown>,
+  slug: ReportSlug = "profit-and-loss",
+): string {
+  const result = parseReportQuery(slug, query);
   if (result.ok) throw new Error("expected a rejection");
   return result.error;
 }
@@ -28,6 +37,10 @@ describe("isReportSlug", () => {
 describe("parseReportQuery", () => {
   it("requires a realm, since there is no default company", () => {
     expect(err({})).toContain("realm");
+  });
+
+  it.each(REPORT_SLUGS)("accepts a bare realm for %s", (slug) => {
+    expect(ok({ realm: "r" }, slug).qboParams).toEqual({});
   });
 
   it("passes the QuickBooks parameters through under their own names", () => {
@@ -111,5 +124,77 @@ describe("parseReportQuery", () => {
 
   it("ignores an empty parameter rather than forwarding it", () => {
     expect(ok({ realm: "r", summarize_column_by: "" }).qboParams).toEqual({});
+  });
+});
+
+describe("what each report accepts", () => {
+  // QuickBooks silently ignores a parameter a report does not take, which
+  // would hand an unattended caller a plausible wrong answer. So the door
+  // refuses instead, and these tests pin which parameters each report takes.
+
+  it("takes an as-of report_date for the aging reports and forwards it", () => {
+    for (const slug of ["aged-receivables", "aged-payables"] as const) {
+      expect(ok({ realm: "r", report_date: "2026-08-31" }, slug).qboParams).toEqual({
+        report_date: "2026-08-31",
+      });
+    }
+  });
+
+  it("rejects a date range on an aging report, which is a snapshot not a period", () => {
+    const message = err(
+      { realm: "r", start_date: "2026-08-01", end_date: "2026-08-31" },
+      "aged-receivables",
+    );
+    expect(message).toContain("start_date");
+    expect(message).toContain("aged-receivables");
+  });
+
+  it("rejects an accounting method on an aging report", () => {
+    expect(
+      err({ realm: "r", accounting_method: "Accrual" }, "aged-payables"),
+    ).toContain("accounting_method");
+  });
+
+  it("rejects report_date on a period report", () => {
+    expect(err({ realm: "r", report_date: "2026-08-31" })).toContain("report_date");
+  });
+
+  it("rejects a malformed report_date", () => {
+    expect(err({ realm: "r", report_date: "Aug 31" }, "aged-receivables")).toContain(
+      "YYYY-MM-DD",
+    );
+  });
+
+  it("rejects an accounting method or period columns on the transaction list", () => {
+    expect(
+      err({ realm: "r", accounting_method: "Cash" }, "transaction-list"),
+    ).toContain("accounting_method");
+    expect(
+      err({ realm: "r", summarize_column_by: "Month" }, "transaction-list"),
+    ).toContain("summarize_column_by");
+  });
+
+  it("takes a date range on the transaction list", () => {
+    expect(
+      ok({ realm: "r", start_date: "2026-08-01", end_date: "2026-08-31" }, "transaction-list")
+        .qboParams,
+    ).toEqual({ start_date: "2026-08-01", end_date: "2026-08-31" });
+  });
+
+  it("takes the same parameters for sales by customer as for the P&L", () => {
+    expect(REPORTS["sales-by-customer"].params).toEqual(REPORTS["profit-and-loss"].params);
+  });
+
+  it("rejects a parameter this door has never heard of, rather than dropping it", () => {
+    expect(err({ realm: "r", customer: "42" })).toContain("customer");
+  });
+
+  it("still ignores an empty value for a parameter the report does not take", () => {
+    expect(ok({ realm: "r", accounting_method: "" }, "transaction-list").qboParams).toEqual({});
+  });
+
+  it("marks the two transaction-level reports as detail, so they carry the default row cap", () => {
+    const detail = REPORT_SLUGS.filter((slug) => REPORTS[slug].detail);
+    expect(detail.sort()).toEqual(["general-ledger", "transaction-list"]);
   });
 });

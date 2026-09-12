@@ -122,10 +122,19 @@ credentials, and not the address of whoever authorized each connection.
 | `GET /api/connections` | Every company the server can currently pull, one entry per company |
 | `GET /api/reports/:report` | One report for one company |
 
-`:report` is a fixed list — `profit-and-loss`, `balance-sheet`, `trial-balance`,
-`general-ledger`. Parameters are the same ones the Claude tools use: `realm`
-(required), `start_date`, `end_date`, `accounting_method`,
-`summarize_column_by`, `format`, `max_rows`.
+`:report` is a fixed list. Parameter names are the ones the Claude tools use,
+but each report takes only the parameters QuickBooks honours for it; any other
+parameter is a 400 rather than being silently dropped. `realm` is required
+everywhere, and `format` and `max_rows` are accepted everywhere.
+
+| Report | Takes |
+|---|---|
+| `profit-and-loss`, `balance-sheet`, `trial-balance`, `general-ledger`, `sales-by-customer` | `start_date` + `end_date` (both or neither), `accounting_method`, `summarize_column_by` |
+| `aged-receivables`, `aged-payables` | `report_date` (as of; defaults to today) |
+| `transaction-list` | `start_date` + `end_date` (both or neither) |
+
+`general-ledger` and `transaction-list` are detail reports and carry the
+default row cap of 5,000 unless `max_rows` says otherwise.
 
 A report answers with three arrays, `columns`, `rows` and `totals`. **`totals`
 carries amounts booked directly to a parent account, which appear in no row.**

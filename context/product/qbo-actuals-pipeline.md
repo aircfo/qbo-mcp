@@ -89,10 +89,15 @@ which client it touched.
 | `GET /api/connections` | Every client the server holds a connection for: realm id, company name, whether the connection needs reconnecting, when it last renewed. Never credentials |
 | `GET /api/reports/:report` | One report for one client |
 
-`:report` is a fixed list — `profit-and-loss`, `balance-sheet`, `trial-balance`,
-`general-ledger` to start. The query parameters are the same ones the Claude tools already
-use, so there is one vocabulary rather than two: `realm`, `start_date`, `end_date`,
-`accounting_method`, `summarize_column_by`, `format`, `max_rows`.
+`:report` is a fixed list: `profit-and-loss`, `balance-sheet`, `trial-balance`,
+`general-ledger`, `sales-by-customer`, `aged-receivables`, `aged-payables` and
+`transaction-list` (the last four added 2026-09-12). The query parameters are the same ones
+the Claude tools already use, so there is one vocabulary rather than two: `realm`,
+`start_date`, `end_date`, `report_date`, `accounting_method`, `summarize_column_by`, `format`,
+`max_rows`. **Each report takes only the parameters QuickBooks honours for it** — the aging
+reports take an as-of `report_date` rather than a range, and the transaction list takes only
+a range — and a parameter that does not apply is answered 400 rather than silently dropped,
+because an unattended caller would never notice the drop.
 
 ```
 GET /api/reports/profit-and-loss

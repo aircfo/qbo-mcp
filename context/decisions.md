@@ -499,3 +499,38 @@ API had both, which is exactly the drift a shared constant prevents. The ceiling
 **Not decided here:** the write path (review item 5). The requirement it adds — every write
 guard re-checked at call time, since a session outlives a switch flip — is recorded in the PR 5
 section of `context/internal-conversion-workplan.md` for the write PR to satisfy.
+
+## 2026-09-12 — Four more reports at the machine door, each declaring what it takes
+
+**Decision:** `GET /api/reports/:report` grows from four slugs to eight — `aged-receivables`,
+`aged-payables`, `sales-by-customer` and `transaction-list` join the statements — and every
+slug now declares which query parameters it accepts. A parameter the report does not take, or
+one this door has never heard of, is a 400. Nothing is silently dropped.
+
+**Why per-report rules rather than one fixed set.** The first four reports happened to share
+a parameter set, so one set was enough. The new ones do not: Intuit's own models
+(`CodesModelsJsonObjects_v2.json`) give the aging summaries an as-of `report_date` and no
+accounting method, and give the transaction list neither an accounting method nor period
+columns. QuickBooks ignores a parameter a report does not take. For a person in a Claude
+session that is a nuisance; for a scheduled job it is a plausible wrong answer nobody is
+watching for — an aging report "for August" that is really aged as of today. Refusing is the
+only way an unattended caller finds out. `REPORTS` in `src/api/reports-logic.ts` is the one
+table that says what each slug takes and whether it is a detail report; the handler reads both
+from it.
+
+**Why unknown names are refused too.** The old parser ignored anything it did not recognise.
+A caller passing `customer=42` would have received the whole company's figures and believed
+them filtered. Same failure, one level up; same fix.
+
+**Why the aging summaries and not the detail reports.** "AR aging" and "AP aging" as a monthly
+statement are the summaries. The detail reports list every open document and take a different
+parameter set (`aging_period`, `past_due`, due-date range); they can be added as their own
+slugs when a pull needs them.
+
+**Why still no filters.** The door produces whole statements for a period. Slicing by customer,
+vendor, class or account stays on the person entrance, where someone is reading the answer.
+
+**Also noted, not fixed here:** the same model JSON shows the aging *summary* models carry no
+`days_per_aging_period` or `num_periods`, which the MCP tools `get_aged_receivables` and
+`get_aged_payables` expose. Those two parameters are probably ignored by QuickBooks. Worth a
+sandbox check and, if confirmed, removing from the tools.
